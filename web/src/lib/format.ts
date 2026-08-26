@@ -176,3 +176,19 @@ export function workArrangementFromLocation(location: string): "Remote" | "Hybri
   if (/\bon-?site\b|\bin-?office\b|\bin\s+person\b/.test(l)) return "On-site";
   return null;
 }
+
+const PASS_REASON_CATEGORIES: [RegExp, string][] = [
+  [/comp|salary|pay/i, "compensation"],
+  [/senior|junior|level/i, "seniority"],
+  [/location|remote|hybrid|onsite|on-site|relocat/i, "location"],
+  [/domain|industry/i, "domain"],
+  [/culture|red flag/i, "culture"],
+  [/already applied/i, "already-applied"],
+];
+
+/** Shared with /api/lead-feedback so a "why I'm passing" reason is bucketed
+ *  the same way everywhere it's captured — Explore/Today's dismiss, the raw
+ *  Pipeline inbox's skip, and a scored application's Discard/SKIP transition. */
+export function categorizePassReason(reason: string): string {
+  return PASS_REASON_CATEGORIES.find(([pattern]) => pattern.test(reason))?.[1] ?? (reason ? "other" : "unspecified");
+}

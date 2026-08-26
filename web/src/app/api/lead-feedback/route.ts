@@ -3,18 +3,10 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { careerOpsRoot, rememberFact } from "@/lib/career-ops";
+import { categorizePassReason } from "@/lib/format";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const CATEGORIES: [RegExp, string][] = [
-  [/comp|salary|pay/i, "compensation"],
-  [/senior|junior|level/i, "seniority"],
-  [/location|remote|hybrid|onsite|on-site|relocat/i, "location"],
-  [/domain|industry/i, "domain"],
-  [/culture|red flag/i, "culture"],
-  [/already applied/i, "already-applied"],
-];
 
 function readFile(file: string) {
   try { return fs.readFileSync(file, "utf8"); } catch { return ""; }
@@ -58,7 +50,7 @@ export async function POST(req: Request) {
   const source = body.source === "today" ? "today" : body.source === "pipeline" ? "pipeline" : "explore";
   if (!/^https?:\/\//i.test(url) || !company || !role) return NextResponse.json({ error: "url, company and role required" }, { status: 400 });
 
-  const category = CATEGORIES.find(([pattern]) => pattern.test(reason))?.[1] ?? (reason ? "other" : "unspecified");
+  const category = categorizePassReason(reason);
   const root = careerOpsRoot();
   const file = path.join(root, "data", "lead-feedback.jsonl");
   const entry = { timestamp: new Date().toISOString(), decision: "dismissed", category, reason: reason || null, company, role, url, source, inPipeline: body.inPipeline === true };

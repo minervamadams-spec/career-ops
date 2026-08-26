@@ -433,25 +433,50 @@ export function findReportFile(n: string): string | null {
  * batches can create a scored tracker row without a full report/link; their
  * source URL remains in scan-history.tsv. Exact company+role matching avoids
  * guessing between similarly named openings. */
+// Strip parenthetical asides and non-alphanumerics so "Sr Manager... (Medical
+// Affairs)" and "Senior Manager..." tokenize close enough to compare.
+const roleTokens = (s: string): string[] =>
+  s.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+
+/** Fraction of the shorter token set found in the longer one — cheap
+ *  word-overlap similarity, not edit distance, but enough to survive an
+ *  LLM's paraphrase ("Sr" / "Ops") of a title it re-typed into the tracker
+ *  from the raw scan text. */
+function roleSimilarity(a: string, b: string): number {
+  const ta = new Set(roleTokens(a));
+  const tb = new Set(roleTokens(b));
+  if (!ta.size || !tb.size) return 0;
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  return shared / Math.min(ta.size, tb.size);
+}
+
 export function findApplicationSourceUrl(app: Application | null): string | null {
   if (!app) return null;
   const tsv = read("data/scan-history.tsv");
   if (!tsv) return null;
   const company = app.company.trim().toLowerCase();
-  const role = app.role.trim().toLowerCase();
-  let found: string | null = null;
+  const role = app.role.trim();
+  let exact: string | null = null;
+  let best: { url: string; score: number } | null = null;
   for (const line of tsv.split("\n")) {
     const cols = line.split("\t");
     if (cols.length < 6) continue;
     const [url, , , rowRole, rowCompany, status] = cols;
-    if (
-      /^https?:\/\//i.test(url) &&
-      rowCompany?.trim().toLowerCase() === company &&
-      rowRole?.trim().toLowerCase() === role &&
-      status?.startsWith("added")
-    ) found = url;
+    if (!/^https?:\/\//i.test(url) || rowCompany?.trim().toLowerCase() !== company || !status?.startsWith("added")) continue;
+    if (rowRole?.trim().toLowerCase() === role.toLowerCase()) {
+      exact = url;
+      continue;
+    }
+    // A same-company posting whose title merely reads differently (title-
+    // case, "Sr" vs "Senior", a trailing team/department in parens) — the
+    // exact-match path above still wins when it's available; this is the
+    // fallback for the far more common case where the tracker's role text
+    // was re-typed/paraphrased by an LLM rather than copied verbatim.
+    const score = roleSimilarity(role, rowRole ?? "");
+    if (score >= 0.5 && (!best || score > best.score)) best = { url, score };
   }
-  return found;
+  return exact ?? best?.url ?? null;
 }
 
 /** True containment check: resolves symlinks before comparing, so a link
