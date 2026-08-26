@@ -38,6 +38,7 @@
  *      node contacts.mjs --vcf [path]        (write vCard, default output/contacts.vcf)
  *      node contacts.mjs --vcf --caller-id   (FN as "Jane Doe (Acme recruiter)")
  *      node contacts.mjs --self-test
+ *      node contacts.mjs add '{"name":"…","company":"…","type":"hiring-manager"}'
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstatSync } from 'fs';
@@ -103,6 +104,36 @@ export function parseContacts(content) {
     }
   }
   return { contacts, quality };
+}
+
+/** Serialize a user-confirmed contact into the canonical TSV schema. */
+export function upsertContactText(content, contact) {
+  const clean = (value) => String(value ?? '').replace(/[\t\r\n]/g, ' ').trim();
+  const row = {
+    name: clean(contact?.name), company: clean(contact?.company), type: clean(contact?.type || 'hiring-manager'),
+    title: clean(contact?.title), phone: clean(contact?.phone), email: clean(contact?.email),
+    linkedin: clean(contact?.linkedin), tracker: clean(contact?.tracker || '-'), notes: clean(contact?.notes),
+  };
+  if (!row.name || !row.company) throw new Error('name and company are required');
+  if (!VALID_TYPES.has(row.type)) throw new Error(`invalid contact type: ${row.type}`);
+  const line = [row.name, row.company, row.type, row.title, row.phone, row.email, row.linkedin, row.tracker || '-', row.notes].join('\t');
+  const lines = String(content || '').replace(/\r\n/g, '\n').split('\n');
+  const key = `${normalizeForHash(row.name)}\u0000${normalizeForHash(row.company)}`;
+  let changed = false;
+  const next = lines.map(raw => {
+    if (!raw.trim() || raw.trim().startsWith('#')) return raw;
+    const cells = raw.split('\t');
+    const current = `${normalizeForHash(cells[0])}\u0000${normalizeForHash(cells[1])}`;
+    if (current !== key) return raw;
+    changed = true;
+    return line;
+  });
+  if (!changed) {
+    if (!next.some(l => l.trim().startsWith('#'))) next.unshift('# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes');
+    while (next.length && !next[next.length - 1]) next.pop();
+    next.push(line);
+  }
+  return next.join('\n').replace(/\n*$/, '\n');
 }
 
 // --- vCard 3.0 emitter ---
@@ -453,6 +484,21 @@ function main() {
   if (selfTestMode) { selfTest(); return; }
 
   const content = existsSync(CONTACTS_PATH) ? readFileSync(CONTACTS_PATH, 'utf-8') : '';
+  const addIdx = args.indexOf('add');
+  if (addIdx !== -1) {
+    try {
+      const raw = args[addIdx + 1];
+      if (!raw) throw new Error('add requires one JSON contact object');
+      const next = upsertContactText(content, JSON.parse(raw));
+      mkdirSync(dirname(CONTACTS_PATH), { recursive: true });
+      writeFileSync(CONTACTS_PATH, next, 'utf8');
+      console.log(JSON.stringify({ ok: true }));
+    } catch (err) {
+      console.error(`contacts add: ${err.message}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   const { contacts, quality } = parseContacts(content);
 
   if (vcfMode) {
