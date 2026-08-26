@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X } from "lucide-react";
+import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, X, TriangleAlert, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
@@ -56,6 +56,11 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN, source = "explore
   );
   const working = job?.status === "running";
   const doneEval = job?.status === "done" && job.kind === "evaluate";
+  // A failed evaluate used to fall straight through to the plain "Evaluate"
+  // button with nothing said about why — same silent-swallow bug as
+  // GeneratePdfButton. Only for a same-URL "evaluate" job — a failed "pdf" or
+  // "research" job on this same offer shouldn't block re-evaluating it.
+  const evalError = job?.status === "error" && job.kind === "evaluate" ? job.steps.at(-1)?.label || "Something went wrong evaluating this." : null;
   const statusLabel = WORKER_LABEL[job?.kind ?? ""] ?? "Working…";
 
   const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
@@ -152,6 +157,19 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN, source = "explore
           >
             <Check className="size-3.5" /> Evaluated · view report
           </a>
+        ) : evalError ? (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex flex-1 items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-2 text-xs font-medium text-red-700 dark:text-red-400">
+              <TriangleAlert className="size-3.5 shrink-0" /> {evalError}
+            </span>
+            <button
+              type="button"
+              onClick={evaluate}
+              className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border px-2.5 py-2 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+            >
+              <RotateCcw className="size-3.5" /> Retry
+            </button>
+          </div>
         ) : working ? (
           <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand">
             <Loader2 className="size-3.5 animate-spin" />

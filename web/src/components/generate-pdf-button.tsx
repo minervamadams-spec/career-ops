@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { FileDown, Loader2, FileText, RotateCcw } from "lucide-react";
+import { FileDown, Loader2, FileText, RotateCcw, TriangleAlert } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
 
@@ -29,6 +29,27 @@ export function GeneratePdfButton({ n, company, pdfReady, variant }: { n: string
         <Loader2 className="size-3.5 animate-spin" /> Generating CV…
       </Link>
     );
+
+  // A failed run used to fall straight through to the plain "Generate" button
+  // below with nothing said about why — clicking it looked like it silently
+  // did nothing. The real reason is already captured as the job's last step
+  // (job-store.tsx's finish()); surface it instead of swallowing it.
+  if (job?.status === "error") {
+    const reason = job.steps.at(-1)?.label || "Something went wrong generating this.";
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-700 dark:text-red-400">
+          <TriangleAlert className="size-3.5 shrink-0" /> {reason}
+        </span>
+        <button
+          onClick={generate}
+          className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+        >
+          <RotateCcw className="size-3.5" /> Retry
+        </button>
+      </span>
+    );
+  }
 
   const ready = pdfReady || job?.status === "done";
   if (ready)

@@ -42,6 +42,7 @@ export function ConfigForm() {
   const [apiKey, setApiKey] = useState("");
   const [logos, setLogos] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   // Load saved prefs
   useEffect(() => {
@@ -58,6 +59,8 @@ export function ConfigForm() {
       }
     } catch {
       /* ignore */
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -73,6 +76,24 @@ export function ConfigForm() {
       })
       .catch(() => setClis([]));
   }, []);
+
+  // Persist the AI-engine choice the moment it changes — clicking a CLI card
+  // (or the auto-select above) used to only update this component's state;
+  // nothing wrote career-ops:config until the user separately scrolled past
+  // Daily Scan Time and Follow-up Cadence to find "Save config" at the very
+  // bottom. The card looked selected instantly, so there was no reason to
+  // expect an extra step was still needed — every evaluate/pdf/etc. run reads
+  // this key directly (job-store.tsx), so an unsaved choice meant every one
+  // of those silently ran with no CLI at all. Gated on `loaded` so this can't
+  // fire with an empty cliId before the load-from-storage effect above runs.
+  useEffect(() => {
+    if (!loaded || !cliId) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    } catch {
+      /* ignore */
+    }
+  }, [loaded, mode, cliId, provider, logos]);
 
   function save() {
     // The API key is deliberately NOT persisted: nothing reads it yet (the

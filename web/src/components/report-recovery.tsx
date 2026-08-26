@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { ExternalLink, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
 
@@ -46,6 +46,11 @@ export function ReportRecovery({ company, role, url }: { company: string; role: 
             <a href={url} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1 text-xs text-brand hover:underline">
               Open original posting <ExternalLink className="size-3" />
             </a>
+            {job?.status === "error" && (
+              <span className="inline-flex w-full items-center gap-1.5 text-xs text-red-700 dark:text-red-400">
+                <TriangleAlert className="size-3.5 shrink-0" /> {job.steps.at(-1)?.label || "The last attempt failed."}
+              </span>
+            )}
           </>
         ) : (
           <p className="text-xs text-muted">The original posting URL was not retained, so this entry needs to be evaluated again from Pipeline.</p>
