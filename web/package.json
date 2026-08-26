@@ -32,6 +32,7 @@
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.18",
     "tailwindcss": "^4.2.2",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.2"
   },
   "overrides": {
