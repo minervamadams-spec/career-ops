@@ -289,7 +289,7 @@ Two separate axes:
 | Wants the LaTeX/Overleaf CV path | `latex` |
 | Maintains their own hand-tuned `.tex` CV and wants it tailored in place (opt-in; cv.md stays the default) | `latex-tex` |
 | Wants a cover letter | `cover` |
-| Wants to add a role to the tracker manually | `add` |
+| Wants to add a role to the tracker manually (a referral, something behind a login, no clean URL) | paste it into `data/pipeline.md` directly (`- [ ] {url}` or `- [ ] local:jds/{file}.md`, see `modes/pipeline.md`), or use the web app's Pipeline → "Add job" form (`/pipeline/add`), which writes the same row plus a `jds/` capture for JD text and any application-questions/dependencies notes. **Not** the `add` mode below — that one is CV-content-only (see the later `add` row) and does not touch the tracker. |
 | Wants to discover CV competencies they forgot to write down | `expand` |
 | Evaluates a course/cert | `training` |
 | Evaluates portfolio project | `project` |
@@ -409,6 +409,8 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 **Report link normalization:** the TSV always carries a root-relative `[num](reports/...)` link; `merge-tracker.mjs` rewrites it relative to the tracker's own directory (`../reports/...` at `data/applications.md`, `reports/...` at root) so links stay clickable. Idempotent; fix an existing tracker with `node merge-tracker.mjs --migrate` (#760).
 
 **Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs` reads it (`REQ_NUMBER_RE`) and treats rows carrying *different* recognizable IDs as distinct openings, overriding fuzzy title matching. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
+
+**Optional `track=` marker in notes (added 2026-08-13, for users running more than one concurrent search track — e.g. a full-time search plus a supplemental/fractional one):** when `config/profile.yml` defines a `tracks:` block, prefix the notes column with `track={key} — ` (e.g. `track=A — Boutique PM shop, remote`) so per-track filtering (dashboard board view, stats) can regex it back out. This is deliberately plain notes text, not a positional TSV extra like `via=` — it needs no schema/column migration, so it's safe to adopt even on an existing tracker with rows that predate it (they just have no track marker and show as unclassified, never rejected). `merge-tracker.mjs` requires no changes to support this: notes is already free text.
 
 ### Pipeline Integrity
 

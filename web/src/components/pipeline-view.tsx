@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, ClipboardCheck, Eye, Loader2 } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -33,9 +33,11 @@ type SortKey = (typeof SORT_KEYS)[number];
 export function PipelineView({
   applications,
   inbox,
+  country,
 }: {
   applications: Application[];
   inbox: InboxJob[];
+  country: string | null;
 }) {
   const params = useSearchParams();
   const router = useRouter();
@@ -56,6 +58,8 @@ export function PipelineView({
   // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
   const [q, setQ] = useState(params.get("q") ?? "");
   const lastUrlQ = useRef(params.get("q") ?? "");
+  const [preparing, setPreparing] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   useEffect(() => {
     const urlQ = params.get("q") ?? "";
     if (urlQ !== lastUrlQ.current) {
@@ -76,6 +80,24 @@ export function PipelineView({
     },
     [params, router, pathname],
   );
+
+  const prepareApplication = async (n: string) => {
+    setPreparing(n);
+    setActionError(null);
+    try {
+      const response = await fetch("/api/board/applying", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n, applying: true }),
+      });
+      if (!response.ok) throw new Error("Could not update this application");
+      router.push(`/pipeline/${n}`);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not update this application");
+    } finally {
+      setPreparing(null);
+    }
+  };
 
   // Pending + deduped by URL (pipeline.md can list the same posting twice) so the
   // header count, the tab count and the triage list all agree on one number.
@@ -181,10 +203,16 @@ export function PipelineView({
         </div>
       )}
 
+      {actionError && (
+        <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+          {actionError}. You can still open the role with View.
+        </p>
+      )}
+
       {tab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} />
+          <InboxTriage inbox={pendingInbox} country={country} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
@@ -206,6 +234,7 @@ export function PipelineView({
                     </span>
                   </th>
                 ))}
+                <th className="px-4 py-2.5 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -230,6 +259,28 @@ export function PipelineView({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-2">
+                      <Link
+                        href={`/pipeline/${r.n}`}
+                        className="inline-flex min-h-9 items-center gap-1 rounded-full border border-border px-3 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand"
+                      >
+                        <Eye className="size-3.5" /> View
+                      </Link>
+                      {canonStatus(r.status) === "EVALUATED" && (
+                        <button
+                          type="button"
+                          onClick={() => prepareApplication(r.n)}
+                          disabled={preparing === r.n}
+                          className="inline-flex min-h-9 items-center gap-1 rounded-full bg-brand px-3 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50"
+                          title="Open the internal detail and prepare application materials; Offerly never submits for you"
+                        >
+                          {preparing === r.n ? <Loader2 className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}
+                          Prepare
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -262,7 +313,7 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="ml-3 font-mono text-xs tracking-wide text-muted">career-ops · inbox</span>
+        <span className="ml-3 font-mono text-xs tracking-wide text-muted">Offerly · inbox</span>
       </div>
       <div className="px-6 py-10 text-center">
         <p className="font-display text-lg">
@@ -280,7 +331,7 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
               <Compass className="size-4" /> Run your first free scan <ArrowRight className="size-4" />
             </Link>
             <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
-              Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
+              Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">node scan.mjs</code>, or add job URLs to{" "}
               <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
             </p>
           </>
