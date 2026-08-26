@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Radar, Wrench } from "lucide-react";
+import { ExternalLink, Loader2, Radar, Wrench } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
-type Company = { name: string; status: string; detail: string };
+type Company = { name: string; status: string; detail: string; careersUrl?: string };
 type Result = { available: boolean; configured: boolean; companies: Company[] };
 
 const TONE: Record<string, { dot: string; label: string; chip: string }> = {
@@ -64,7 +64,7 @@ export function PortalsView() {
 
       {res && !res.available && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-          <code className="text-foreground">verify-portals.mjs</code> not found — this needs a complete career-ops
+          <code className="text-foreground">verify-portals.mjs</code> not found — this needs a complete Offerly
           checkout (the web orchestrates the core&apos;s validator).
         </p>
       )}
@@ -100,7 +100,19 @@ export function PortalsView() {
                 <li key={c.name} className="flex items-center gap-3 px-4 py-2.5">
                   <CompanyLogo name={c.name} size={20} />
                   <span className={cn("size-1.5 shrink-0 rounded-full", t.dot)} />
-                  <span className="shrink-0 text-sm font-medium">{c.name}</span>
+                  {c.careersUrl ? (
+                    <a
+                      href={c.careersUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Open ${c.name}'s careers page`}
+                      className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-foreground transition-colors hover:text-brand"
+                    >
+                      {c.name} <ExternalLink className="size-3 text-faint" />
+                    </a>
+                  ) : (
+                    <span className="shrink-0 text-sm font-medium">{c.name}</span>
+                  )}
                   <span className="truncate font-mono text-xs text-faint">{c.detail}</span>
                   <div className="ml-auto flex shrink-0 items-center gap-2">
                     {c.status === "broken" && <FixAffordance company={c.name} job={fixByCompany.get(c.name)} onFix={() => startJob({ title: `Fix · ${c.name}`, subtitle: "repair portal slug", kind: "fix-portal", input: c.name, page: "/portals" })} />}

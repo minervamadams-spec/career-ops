@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 
 export const runtime = "nodejs";
@@ -37,10 +38,31 @@ export async function GET() {
     );
   });
 
-  const companies: { name: string; status: string; detail: string }[] = [];
+  // Map name -> careers_url from the real portals.yml so each row can link out
+  // to the actual careers page (#2116 — rows were unclickable dead text).
+  const careersUrlByName = new Map<string, string>();
+  try {
+    const doc = yaml.load(fs.readFileSync(path.join(root, "portals.yml"), "utf8")) as { tracked_companies?: unknown } | null;
+    const list = Array.isArray(doc?.tracked_companies) ? doc!.tracked_companies : [];
+    for (const c of list as unknown[]) {
+      if (c && typeof c === "object" && "name" in c && "careers_url" in c) {
+        const rec = c as Record<string, unknown>;
+        if (typeof rec.name === "string" && typeof rec.careers_url === "string") {
+          careersUrlByName.set(rec.name, rec.careers_url);
+        }
+      }
+    }
+  } catch {
+    /* best-effort — rows just won't be clickable */
+  }
+
+  const companies: { name: string; status: string; detail: string; careersUrl?: string }[] = [];
   for (const line of stdout.split("\n")) {
     const m = line.match(/^\s*(✅|🟡|❌|➖)\s+(.+?)\s+—\s+(.*)$/);
-    if (m) companies.push({ name: m[2].trim(), status: STATUS[m[1]] ?? "unknown", detail: m[3].trim() });
+    if (m) {
+      const name = m[2].trim();
+      companies.push({ name, status: STATUS[m[1]] ?? "unknown", detail: m[3].trim(), careersUrl: careersUrlByName.get(name) });
+    }
   }
   return Response.json({ available: true, configured: true, companies });
 }
