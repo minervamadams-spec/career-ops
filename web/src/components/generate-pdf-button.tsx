@@ -10,14 +10,18 @@ import { CostBadge } from "@/components/cost/cost-badge";
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
 // Once a tailored CV exists (tracker PDF ✅, or a pdf worker just finished), it
 // becomes a "View tailored CV" link (served by /api/cv-pdf) + a regenerate icon.
-export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company: string; pdfReady: boolean }) {
+export function GeneratePdfButton({ n, company, pdfReady, variant }: { n: string; company: string; pdfReady: boolean; variant?: string }) {
   const { jobs, startJob } = useJobs();
   const job = useMemo(
     () => jobs.filter((j) => j.kind === "pdf" && j.input === n).sort((a, b) => b.startedAt - a.startedAt)[0],
     [jobs, n],
   );
   const generate = () =>
-    startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}` });
+    startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}`, variant });
+  const regenerate = () => {
+    if (!window.confirm("Replace this tailored CV with a newly generated version? The current PDF will remain in Saved versions.")) return;
+    generate();
+  };
 
   if (job?.status === "running")
     return (
@@ -39,11 +43,12 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
           <FileText className="size-3.5" /> View tailored CV
         </a>
         <button
-          onClick={generate}
-          title="Regenerate the tailored CV"
-          className="inline-flex items-center justify-center rounded-full p-1 text-faint transition-colors hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]"
+          onClick={regenerate}
+          title="Generate a new version"
+          aria-label="Generate a new tailored CV version"
+          className="inline-flex items-center justify-center gap-1 rounded-full px-2 py-1 text-xs text-faint transition-colors hover:text-brand max-sm:min-h-[44px]"
         >
-          <RotateCcw className="size-3" />
+          <RotateCcw className="size-3" /> New version
         </button>
       </span>
     );

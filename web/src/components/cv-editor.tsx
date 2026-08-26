@@ -13,6 +13,10 @@ export function CvEditor() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // cv.md may contain source/provenance comments that are useful in the editor
+  // but are not candidate-facing CV content. react-markdown escapes raw HTML by
+  // default, so strip comments for preview instead of displaying their code.
+  const preview = content.replace(/<!--[\s\S]*?-->/g, "");
 
   useEffect(() => {
     fetch("/api/cv")
@@ -84,8 +88,8 @@ export function CvEditor() {
             className="min-h-[60vh] w-full resize-none rounded-2xl border border-border bg-surface/50 p-4 font-mono text-sm leading-relaxed outline-none transition-colors placeholder:text-faint focus:border-brand/40"
           />
           <article className="report-prose min-h-[60vh] overflow-auto rounded-2xl border border-border bg-surface/30 p-5">
-            {content.trim() ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            {preview.trim() ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview}</ReactMarkdown>
             ) : (
               <p className="text-muted">Preview appears here.</p>
             )}

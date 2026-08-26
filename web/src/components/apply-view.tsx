@@ -222,9 +222,19 @@ export function ApplyView() {
           {done && (
             <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm backdrop-blur-sm">
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
-              <div>
+              <div className="min-w-0 flex-1">
                 <span className="font-medium text-emerald-700 dark:text-emerald-400">The real form is now in front, pre-filled.</span>{" "}
-                <span className="text-muted">Review it and click Submit yourself — career-ops never submits for you.</span>
+                <span className="text-muted">Review it and click Submit yourself — Offerly never submits for you.</span>
+                {/* Submitting happens on the real employer site, which Offerly has no
+                    visibility into — so the tracker only knows once you say so here. */}
+                {a.n ? (
+                  <MarkAppliedButton n={a.n} />
+                ) : (
+                  <p className="mt-2 text-xs text-muted">
+                    This wasn&apos;t opened from an evaluated report, so there&apos;s no tracker row to update — once you submit, add it
+                    from the <a href="/pipeline" className="text-brand hover:underline">Pipeline</a> if you want it tracked.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -359,6 +369,46 @@ function RotatingStatus() {
   return (
     <div key={i} className="co-rise truncate text-xs text-muted">
       {DRAFT_MSGS[i]}
+    </div>
+  );
+}
+
+// After the real submit happens off-site, this is how the tracker finds out —
+// same UPDATE-only /api/status path the home decision card uses (#2116: "how
+// does the site know I applied?" — it doesn't, until this is clicked).
+function MarkAppliedButton({ n }: { n: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  if (state === "done") {
+    return (
+      <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+        <Check className="size-3.5" /> Marked applied in your tracker.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2.5">
+      <button
+        type="button"
+        disabled={state === "busy"}
+        onClick={async () => {
+          setState("busy");
+          try {
+            const r = await fetch("/api/status", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ n, status: "Applied" }),
+            });
+            setState(r.ok ? "done" : "error");
+          } catch {
+            setState("error");
+          }
+        }}
+        className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/25 disabled:opacity-60 dark:text-emerald-400 max-sm:min-h-[44px]"
+      >
+        {state === "busy" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+        {state === "busy" ? "Marking…" : "I submitted it — mark applied"}
+      </button>
+      {state === "error" && <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">Couldn&apos;t update the tracker — try again, or mark it from the Pipeline.</p>}
     </div>
   );
 }

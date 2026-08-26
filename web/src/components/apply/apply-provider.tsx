@@ -13,6 +13,10 @@ type ApplyCtx = {
   url: string;
   title: string;
   company: string;
+  /** Tracker report number, when opened from an already-evaluated row (e.g. the
+   *  report page's Apply button) — powers the "Mark applied" button on done.
+   *  Undefined when opened from a raw pasted URL with no tracker row yet. */
+  n: string | null;
   fields: ApplyField[];
   answers: Record<string, string>;
   meta: Record<string, Meta>;
@@ -22,7 +26,7 @@ type ApplyCtx = {
   issues: ApplyIssue[];
   driveSteps: DriveStep[];
   error: string;
-  open: (url: string, opts?: { prefill?: boolean; company?: string }) => Promise<void>;
+  open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string) => void;
   fill: () => Promise<void>;
@@ -51,6 +55,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
+  const [n, setN] = useState<string | null>(null);
   const [fields, setFields] = useState<ApplyField[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [meta, setMeta] = useState<Record<string, Meta>>({});
@@ -125,7 +130,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string }) => {
+  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string }) => {
     setStatus("opening");
     setError("");
     setFields([]);
@@ -138,6 +143,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setUrl(u);
     setCompany(opts?.company ?? "");
     companyRef.current = opts?.company ?? "";
+    setN(opts?.n ?? null);
     pendingPrefill.current = false;
     try {
       const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId() }) });
@@ -272,7 +278,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           return [...prev, ...(d.issues as ApplyIssue[]).filter((i) => !seen.has(i.message))];
         });
       }
-      if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
+      if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (Offerly never submits for you).");
       setStatus("done");
       // ESCALATION ("si no va, full agente"): if deterministic fill clearly
       // didn't land (most fields failed / mismatched), let the agent fill it.
@@ -354,6 +360,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setUrl("");
     setTitle("");
     setCompany("");
+    setN(null);
     setFields([]);
     setAnswers({});
     setMeta({});
@@ -366,8 +373,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset }),
-    [status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset],
+    () => ({ status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset }),
+    [status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

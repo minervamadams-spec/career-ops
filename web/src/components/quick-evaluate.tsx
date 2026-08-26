@@ -44,12 +44,12 @@ export function QuickEvaluate() {
           onClick={run}
           className="shrink-0 rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
         >
-          Evaluate
+          Full evaluation
         </button>
       </div>
       <div className="mt-2 flex items-center gap-2">
         <CostBadge kind="spend" size="xs" />
-        <span className="text-xs text-faint">Evaluation runs on your own AI — your key, your machine.</span>
+        <span className="text-xs text-faint">Detailed A–G report · usually 2–5 min · runs on your own AI.</span>
       </div>
       {hint && <p className="mt-1 text-xs text-faint">{hint}</p>}
     </div>

@@ -9,17 +9,16 @@ import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
+import { ResumesPanel } from "@/components/resumes-panel";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { ReportRecovery } from "@/components/report-recovery";
+import { ApplicationQuestions } from "@/components/application-questions";
+import { GapConfirmation } from "@/components/gap-confirmation";
+import { ContactsPanel } from "@/components/contacts-panel";
 
-// Progressive disclosure of the report. The core writes prose blocks
-// "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
-// C–G + machine artifacts (Machine Summary YAML, Application Answers, submit
-// log). A mainstream user deciding "should I apply?" needs the verdict + fit;
-// the rest is depth-on-demand. We lead with the verdict as a callout, keep A/B
-// expanded, collapse C–G as content, and drop machine artifacts to a dimmer
-// "Technical" tier — and strip the bare "F)" author-letters from headings
-// (native <details>, no client JS — this stays a server component).
+// The report is an audit trail, not the primary interface. Lead with a short
+// decision brief and keep the full analysis behind one explicit disclosure.
 
 type Section = { heading: string; letter: string | null; content: string };
 
@@ -50,6 +49,25 @@ function preview(md: string): string {
   return sentence.length > 96 ? sentence.slice(0, 96).trimEnd() + "…" : sentence;
 }
 
+function tableRows(md: string): string[][] {
+  return md
+    .split("\n")
+    .filter((line) => /^\s*\|.*\|\s*$/.test(line) && !/^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/.test(line))
+    .map((line) => line.slice(line.indexOf("|") + 1, line.lastIndexOf("|")).split("|").map((cell) => cell.trim()))
+    .filter((row) => !/^(field|jd requirement|source|signal)$/i.test(row[0] ?? ""));
+}
+
+function decisionBrief(sections: Section[]) {
+  const role = sections.find((s) => s.letter === "A");
+  const match = sections.find((s) => s.letter === "B");
+  const roleRows = role ? tableRows(role.content) : [];
+  const summary = roleRows.find((row) => /^tl;?dr$/i.test(row[0] ?? ""))?.[1] ?? (role ? preview(role.content) : "");
+  const strengths = match ? tableRows(match.content).slice(0, 3).map((row) => row[0]).filter(Boolean) : [];
+  const gapsText = match?.content.split(/\*\*Gaps:\*\*/i)[1] ?? "";
+  const gaps = [...gapsText.matchAll(/^\s*\d+\.\s+\*\*(.+?)\*\*/gm)].slice(0, 3).map((m) => m[1]);
+  return { summary, strengths, gaps };
+}
+
 function splitSections(body: string): { intro: string; sections: Section[] } {
   const intro: string[] = [];
   const sections: Section[] = [];
@@ -75,11 +93,13 @@ export function ReportView({
   id,
   app,
   report,
+  recoveryUrl,
   canDelete = false,
 }: {
   id: string;
   app: Application | null;
   report: string | null;
+  recoveryUrl?: string | null;
   /** kept in the props contract (the page passes it) but no longer surfaced —
    *  the raw .md filename is a dev artifact, not header content. */
   file?: string | null;
@@ -122,9 +142,12 @@ export function ReportView({
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
-          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
+          {report && <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />}
+          {report && <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />}
         </div>
+
+        {report && <ResumesPanel n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />}
+        {app && <ContactsPanel company={app.company} tracker={id} />}
 
         {app && canDelete && (
           <div className="mt-3">
@@ -163,15 +186,9 @@ export function ReportView({
                 </article>
               );
             }
-            // Verdict (F) leads as a highlighted callout with no competing heading —
-            // it's THE answer. A/B stay expanded (fit detail); C–G collapse as
-            // content (with a 1-line preview); machine artifacts drop to a dimmer
-            // "Technical" tier so the CLI-DNA is present-but-clearly-secondary.
-            const verdict = sections.find((s) => s.letter === "F");
-            const rest = sections.filter((s) => s !== verdict);
-            const machine = rest.filter((s) => isMachine(s.heading));
-            const mainSections = rest.filter((s) => !isMachine(s.heading));
-            const anyAB = mainSections.some((s) => s.letter === "A" || s.letter === "B");
+            const brief = decisionBrief(sections);
+            const machine = sections.filter((s) => isMachine(s.heading));
+            const mainSections = sections.filter((s) => !isMachine(s.heading));
             return (
               <div className="mt-8">
                 {intro && (
@@ -180,68 +197,69 @@ export function ReportView({
                   </article>
                 )}
 
-                {verdict && (
-                  <div className="rounded-2xl border border-brand/25 bg-brand-soft/50 px-5 py-4">
-                    <p className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">Verdict</p>
-                    <article className="report-prose [&_p]:font-medium [&_p]:text-foreground">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{verdict.content}</ReactMarkdown>
-                    </article>
-                  </div>
-                )}
-
-                {mainSections.map((s, i) => {
-                  const expanded = s.letter === "A" || s.letter === "B" || (!anyAB && i === 0);
-                  if (expanded) {
-                    return (
-                      <article key={i} className="report-prose mt-6">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{`## ${cleanHeading(s.heading)}\n\n${s.content}`}</ReactMarkdown>
-                      </article>
-                    );
-                  }
-                  return (
-                    <details key={i} className="group mt-3 overflow-hidden rounded-xl border border-border bg-surface/30">
-                      <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover">
-                        <span className="text-sm font-medium">{cleanHeading(s.heading)}</span>
-                        <span className="hidden truncate text-xs text-faint sm:inline">{preview(s.content)}</span>
-                        <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
-                      </summary>
-                      <div className="report-prose border-t border-border px-4 py-3">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.content}</ReactMarkdown>
+                <div className="rounded-2xl border border-brand/25 bg-brand-soft/40 p-5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-brand/80">Decision brief</p>
+                  {brief.summary && <p className="mt-2 text-sm leading-6 text-foreground">{brief.summary}</p>}
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    {brief.strengths.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Strong matches</p>
+                        <ul className="mt-2 space-y-1.5 text-sm text-foreground">
+                          {brief.strengths.map((item) => <li key={item} className="flex gap-2"><span className="text-good">✓</span><span>{item}</span></li>)}
+                        </ul>
                       </div>
-                    </details>
-                  );
-                })}
+                    )}
+                    {brief.gaps.length > 0 && <GapConfirmation gaps={brief.gaps} />}
+                  </div>
+                </div>
 
-                {machine.length > 0 && (
-                  <>
-                    <div className="mt-6 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-faint">
-                      <span className="h-px flex-1 bg-border" />
-                      Technical details · for developers
-                      <span className="h-px flex-1 bg-border" />
-                    </div>
-                    {machine.map((s, i) => (
-                      <details key={i} className="group mt-2 overflow-hidden rounded-xl border border-border/60 bg-surface/20">
-                        <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-4 py-3 font-mono text-xs text-muted transition-colors hover:bg-surface-hover">
-                          {cleanHeading(s.heading)}
-                          <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
+                <ApplicationQuestions id={id} />
+
+                <details className="group mt-4 overflow-hidden rounded-xl border border-border bg-surface/30">
+                  <summary className="flex min-h-[48px] cursor-pointer list-none items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover">
+                    <span className="text-sm font-medium">Full analysis</span>
+                    <span className="text-xs text-faint">Evidence, interview prep, compensation and risks</span>
+                    <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="border-t border-border px-4 pb-4">
+                    {mainSections.map((s, i) => (
+                      <details key={i} className="group/section mt-3 overflow-hidden rounded-lg border border-border/70">
+                        <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-3 py-2.5 hover:bg-surface-hover">
+                          <span className="text-sm font-medium">{cleanHeading(s.heading)}</span>
+                          <span className="hidden truncate text-xs text-faint sm:inline">{preview(s.content)}</span>
+                          <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open/section:rotate-180" />
                         </summary>
-                        <div className="report-prose border-t border-border/60 px-4 py-3 opacity-80">
+                        <div className="report-prose overflow-x-auto border-t border-border/70 px-4 py-3">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.content}</ReactMarkdown>
                         </div>
                       </details>
                     ))}
-                  </>
-                )}
+                    {machine.map((s, i) => (
+                      <details key={i} className="group/section mt-3 overflow-hidden rounded-lg border border-border/60 opacity-80">
+                        <summary className="flex min-h-[44px] cursor-pointer list-none items-center px-3 py-2.5 font-mono text-xs text-muted">
+                          Technical: {cleanHeading(s.heading)}
+                          <ChevronDown className="ml-auto size-4 transition-transform group-open/section:rotate-180" />
+                        </summary>
+                        <div className="report-prose overflow-x-auto border-t border-border/60 px-4 py-3">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.content}</ReactMarkdown>
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </details>
               </div>
             );
           })()}
           <ScoreMethodology />
         </>
       ) : (
-        <div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/30 p-5 text-sm text-muted">
-          <FileText className="size-5 shrink-0 text-faint" />
-          No report file found for #{id} in <code className="text-foreground">reports/</code>.
-        </div>
+        app ? (
+          <ReportRecovery company={app.company} role={app.role} url={recoveryUrl ?? null} />
+        ) : (
+          <div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/30 p-5 text-sm text-muted">
+            <FileText className="size-5 shrink-0 text-faint" /> No detailed report was found for #{id}.
+          </div>
+        )
       )}
     </div>
   );
