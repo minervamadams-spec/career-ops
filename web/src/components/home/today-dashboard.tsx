@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cachedJson, invalidateClientQuery } from "@/lib/client-query";
-import { Bell, CircleHelp, Sparkles, ArrowRight, BriefcaseBusiness } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { Bell, CircleHelp, Sparkles, ArrowRight, BriefcaseBusiness, ChevronDown } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
@@ -215,15 +216,52 @@ export function TodayDashboard({
   );
 }
 
+const COLLAPSE_KEY = "career-ops:today-collapsed";
+
+function readCollapsed(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+// Every Today section is collapsible — the queue reads as "a lot" the moment
+// more than one card group has items, and there's no reason to force scrolling
+// past a group the user has already triaged for the session. Per-section state
+// persists (keyed by title) so a collapsed section stays collapsed on reload.
 function Section({ icon: Icon, title, hint, children }: { icon: React.ComponentType<{ className?: string }>; title: string; hint: string; children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => setCollapsed(!!readCollapsed()[title]), [title]);
+
+  const toggle = () => {
+    setCollapsed((was) => {
+      const next = !was;
+      try {
+        const all = readCollapsed();
+        all[title] = next;
+        localStorage.setItem(COLLAPSE_KEY, JSON.stringify(all));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   return (
     <section className="mt-10">
-      <div className="mb-3 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={!collapsed}
+        className="mb-3 flex w-full items-center gap-2 text-left"
+      >
         <Icon className="size-4 text-brand" />
         <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">{title}</h2>
         <span className="text-xs text-faint">· {hint}</span>
-      </div>
-      {children}
+        <ChevronDown className={cn("ml-auto size-4 text-faint transition-transform", collapsed && "-rotate-90")} />
+      </button>
+      {!collapsed && children}
     </section>
   );
 }

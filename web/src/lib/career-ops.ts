@@ -46,9 +46,12 @@ export type ProfileConfig = {
   country: string | null;
   /** Home ZIP used only for commute-distance display. */
   commuteZip: string | null;
+  /** `location.max_commute_miles` — the user's hard cutoff for a non-remote
+   *  commute. null when unset (no cutoff enforced). */
+  maxCommuteMiles: number | null;
 };
 
-const PROFILE_DEFAULTS: ProfileConfig = { tracks: {}, weeklyTargets: null, country: null, commuteZip: null };
+const PROFILE_DEFAULTS: ProfileConfig = { tracks: {}, weeklyTargets: null, country: null, commuteZip: null, maxCommuteMiles: null };
 
 /**
  * Reads the `tracks:`, `weekly_targets:`, and `location.country` fields from
@@ -72,10 +75,11 @@ export function readProfileConfig(): ProfileConfig {
       wt && typeof wt.jobs_added_per_week === "number" && typeof wt.applying_days_per_week === "number"
         ? { jobsAddedPerWeek: wt.jobs_added_per_week, applyingDaysPerWeek: wt.applying_days_per_week }
         : null;
-    const loc = doc?.location as { country?: string; zip?: string | number } | undefined;
+    const loc = doc?.location as { country?: string; zip?: string | number; max_commute_miles?: number } | undefined;
     const country = typeof loc?.country === "string" && loc.country.trim() ? loc.country.trim() : null;
     const commuteZip = loc?.zip != null && String(loc.zip).trim() ? String(loc.zip).trim() : null;
-    return { tracks, weeklyTargets, country, commuteZip };
+    const maxCommuteMiles = typeof loc?.max_commute_miles === "number" && Number.isFinite(loc.max_commute_miles) ? loc.max_commute_miles : null;
+    return { tracks, weeklyTargets, country, commuteZip, maxCommuteMiles };
   } catch {
     return PROFILE_DEFAULTS;
   }

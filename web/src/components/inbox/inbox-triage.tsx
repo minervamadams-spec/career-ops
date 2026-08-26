@@ -17,6 +17,11 @@ const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
 const CONFIG_KEY = "career-ops:config";
 const BATCH = 20;
+// Default freshness ceiling — an unbounded inbox reads as "these keep coming
+// back" once any other facet is touched (anyFacet lifts the BATCH cap, and an
+// untouched `within` used to mean "no age limit at all"). Matches Explore's
+// own DEFAULT_FILTERS.sinceDays.
+const DEFAULT_WITHIN_DAYS = 7;
 
 // The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
@@ -26,7 +31,7 @@ export function InboxTriage({ inbox, country }: { inbox: InboxJob[]; country: st
   const { jobs, startJob } = useJobs();
 
   // facets
-  const [within, setWithin] = useState<number | null>(null);
+  const [within, setWithin] = useState<number | null>(DEFAULT_WITHIN_DAYS);
   const [sources, setSources] = useState<Set<AtsSource>>(() => new Set());
   const [seniorities, setSeniorities] = useState<Set<Seniority>>(() => new Set());
   const [locQ, setLocQ] = useState("");
@@ -141,7 +146,7 @@ export function InboxTriage({ inbox, country }: { inbox: InboxJob[]; country: st
     return (bManual - aManual) || ((a.age ?? Infinity) - (b.age ?? Infinity));
   }), [filtered]);
 
-  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || usOnly !== defaultUsOnly;
+  const anyFacet = within !== DEFAULT_WITHIN_DAYS || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || usOnly !== defaultUsOnly;
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
@@ -216,7 +221,7 @@ export function InboxTriage({ inbox, country }: { inbox: InboxJob[]; country: st
         resultCount={filtered.length}
         totalCount={enriched.length - hiddenCount}
         anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setUsOnly(defaultUsOnly); }}
+        onClear={() => { setWithin(DEFAULT_WITHIN_DAYS); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setUsOnly(defaultUsOnly); }}
       />
 
       {/* batch header: fresh slice by default, or the full filtered set */}

@@ -3,6 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, readApplications, readDismissedLeadUrls, readInbox, readProfileConfig } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { estimateCommuteMiles } from "@/lib/commute-distance.mjs";
+import { workArrangementFromLocation } from "@/lib/format";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,18 +29,24 @@ export async function GET(req: Request) {
   const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
   const dismissed = readDismissedLeadUrls();
   const inboxByUrl = new Map(readInbox().map((job) => [job.url, job]));
-  const { commuteZip } = readProfileConfig();
+  const { commuteZip, maxCommuteMiles } = readProfileConfig();
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
     if (!url || !/^https?:\/\//i.test(url)) return null;
     if (dismissed.has(url)) return null;
-    if (status && /skipped|expired/i.test(status)) return null;
+    if (status && /skipped|expired|rejected/i.test(status)) return null;
     if (company && evaluated.has(norm(company))) return null;
     const inbox = inboxByUrl.get(url);
     const commute = inbox?.location?.match(/(?:^|[,·]\s*)(\d+(?:\.\d+)?)\s*mi\b/i);
     const recordedMiles = commute ? Number(commute[1]) : undefined;
     const estimatedMiles = recordedMiles == null ? estimateCommuteMiles(location, commuteZip) : null;
+    const commuteMiles = recordedMiles ?? estimatedMiles ?? undefined;
+    // A hard local-radius cutoff: only applies to a concrete on-site/hybrid
+    // workplace with a known distance — remote roles and roles with no
+    // resolvable location are never excluded on commute alone.
+    const arrangement = workArrangementFromLocation(location || "");
+    if (maxCommuteMiles != null && arrangement !== "Remote" && typeof commuteMiles === "number" && commuteMiles > maxCommuteMiles) return null;
     return {
       url,
       company: (company || "").trim(),
@@ -49,7 +56,7 @@ export async function GET(req: Request) {
       ats: (portal || "").replace(/-full$/, "").trim() || "other",
       source: "whats-new",
       compensation: inbox?.compensation,
-      commuteMiles: recordedMiles ?? estimatedMiles ?? undefined,
+      commuteMiles,
       commuteApprox: recordedMiles == null && estimatedMiles != null,
     };
   };
