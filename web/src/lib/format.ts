@@ -158,3 +158,21 @@ export function parseReport(md: string): ReportMeta {
 
   return { title, fields, legitimacy, body: body || md };
 }
+
+/**
+ * Best-effort Remote/Hybrid/On-site read from a posting's raw location
+ * string (the only location signal a scanned/discovered offer carries — see
+ * DiscoveredOffer.location in explore.ts). Not a structured field the ATS
+ * gives us; just keyword-matching whatever text the job board wrote. Returns
+ * null when the text gives no signal either way, rather than guessing
+ * "on-site" by default — an unlabeled location is genuinely unknown, not
+ * necessarily on-site.
+ */
+export function workArrangementFromLocation(location: string): "Remote" | "Hybrid" | "On-site" | null {
+  const l = (location || "").toLowerCase();
+  if (!l.trim()) return null;
+  if (/\bhybrid\b/.test(l)) return "Hybrid";
+  if (/\bremote\b/.test(l)) return "Remote";
+  if (/\bon-?site\b|\bin-?office\b|\bin\s+person\b/.test(l)) return "On-site";
+  return null;
+}

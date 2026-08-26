@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 
@@ -37,6 +38,49 @@ export function trackerCanDelete(): boolean {
   }
 }
 
+export type ProfileConfig = {
+  tracks: Record<string, { label: string }>;
+  weeklyTargets: { jobsAddedPerWeek: number; applyingDaysPerWeek: number } | null;
+  /** `location.country` from config/profile.yml (e.g. "United States"), or
+   *  null when unset — drives the pipeline inbox's default location facet. */
+  country: string | null;
+  /** Home ZIP used only for commute-distance display. */
+  commuteZip: string | null;
+};
+
+const PROFILE_DEFAULTS: ProfileConfig = { tracks: {}, weeklyTargets: null, country: null, commuteZip: null };
+
+/**
+ * Reads the `tracks:`, `weekly_targets:`, and `location.country` fields from
+ * config/profile.yml (added 2026-08-13, see AGENTS.md's `track=` notes
+ * convention). All are optional user-layer config — a profile.yml without
+ * them (or missing entirely) degrades to defaults rather than erroring, same
+ * "don't penalize missing data" discipline the core scanner filters use.
+ */
+export function readProfileConfig(): ProfileConfig {
+  const raw = read("config/profile.yml");
+  if (!raw) return PROFILE_DEFAULTS;
+  try {
+    const doc = yaml.load(raw) as Record<string, unknown>;
+    const tracksRaw = (doc?.tracks ?? {}) as Record<string, { label?: string }>;
+    const tracks: Record<string, { label: string }> = {};
+    for (const [key, val] of Object.entries(tracksRaw)) {
+      if (val && typeof val.label === "string") tracks[key] = { label: val.label };
+    }
+    const wt = doc?.weekly_targets as { jobs_added_per_week?: number; applying_days_per_week?: number } | undefined;
+    const weeklyTargets =
+      wt && typeof wt.jobs_added_per_week === "number" && typeof wt.applying_days_per_week === "number"
+        ? { jobsAddedPerWeek: wt.jobs_added_per_week, applyingDaysPerWeek: wt.applying_days_per_week }
+        : null;
+    const loc = doc?.location as { country?: string; zip?: string | number } | undefined;
+    const country = typeof loc?.country === "string" && loc.country.trim() ? loc.country.trim() : null;
+    const commuteZip = loc?.zip != null && String(loc.zip).trim() ? String(loc.zip).trim() : null;
+    return { tracks, weeklyTargets, country, commuteZip };
+  } catch {
+    return PROFILE_DEFAULTS;
+  }
+}
+
 function read(rel: string): string | null {
   try {
     return fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8");
@@ -45,7 +89,66 @@ function read(rel: string): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string };
+/** Non-blocking sibling of read() for request-time Server Components: a
+ *  genuinely slow or blocked data source (network mount, first-touch antivirus
+ *  scan, an external drive that went to sleep) must never stall the RSC render
+ *  on the event loop — callers race these against a bounded timeout and fall
+ *  back to safe defaults. Parsing is shared with the sync readers via
+ *  parseInbox/parseApplications/parseDismissedLeadUrls, so behavior can't drift. */
+async function readAsync(rel: string): Promise<string | null> {
+  try {
+    return await fs.promises.readFile(path.join(careerOpsRoot(), rel), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+export async function readInboxAsync(): Promise<InboxJob[]> {
+  const [md, feedback] = await Promise.all([readAsync("data/pipeline.md"), readAsync("data/lead-feedback.jsonl")]);
+  if (!md) return [];
+  return parseInbox(md, parseDismissedLeadUrls(feedback));
+}
+
+export async function readApplicationsAsync(): Promise<Application[]> {
+  const md = await readAsync("data/applications.md");
+  if (!md) return [];
+  return parseApplications(md, careerOpsRoot());
+}
+
+/** Like careerOpsRoot()+existsSync but non-blocking; false on any error. */
+export async function careerOpsRootExistsAsync(): Promise<boolean> {
+  try {
+    await fs.promises.access(careerOpsRoot());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** URLs explicitly dismissed by the user. This is durable server-side state,
+ * not merely a browser preference, so every surface can suppress the same job
+ * before hydration instead of briefly rendering it again. */
+function parseDismissedLeadUrls(raw: string | null): Set<string> {
+  const urls = new Set<string>();
+  if (!raw) return urls;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { decision?: unknown; url?: unknown };
+      if (entry.decision === "dismissed" && typeof entry.url === "string") urls.add(entry.url);
+    } catch {
+      // Append-only logs may contain a damaged trailing line after an interrupted
+      // write. Keep the valid decisions instead of making the inbox unusable.
+    }
+  }
+  return urls;
+}
+
+export function readDismissedLeadUrls(): Set<string> {
+  return parseDismissedLeadUrls(read("data/lead-feedback.jsonl"));
+}
+
+export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; commuteMiles?: number; commuteApprox?: boolean; note?: string; done: boolean; postedAt?: string };
 
 /** A pipeline-row segment like `posted: 2026-07-14`, `trust: 62 stale` or
  *  `note: …` — the core appends these LABELED segments after whatever
@@ -61,9 +164,7 @@ const LABELED_SEGMENT = /^([a-z][a-z_-]*):\s*(.*)$/i;
  *  (posted:/trust:/note:/…) are filtered out of positional assignment wherever
  *  they appear and surfaced when useful (posted: → postedAt). Unknown labels
  *  and further trailing columns are ignored gracefully. */
-export function readInbox(): InboxJob[] {
-  const md = read("data/pipeline.md");
-  if (!md) return [];
+function parseInbox(md: string, dismissed: Set<string>): InboxJob[] {
   const jobs: InboxJob[] = [];
   for (const line of md.split("\n")) {
     const m = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)$/);
@@ -86,12 +187,31 @@ export function readInbox(): InboxJob[] {
       role: parts[2],
       location: parts[3] || undefined, // optional 4th column (#1015)
       compensation: parts[4] || undefined, // optional 5th column (#1017); 6th+ ignored
+      note: labels.get("note") || undefined,
       // the row's own posting date (scan.mjs `posted:` label) — a more direct
       // freshness signal than the scan-history join, which stays as fallback
       postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
     });
   }
-  return jobs;
+  return dismissed.size ? jobs.filter((job) => !dismissed.has(job.url)) : jobs;
+}
+
+export function readInbox(): InboxJob[] {
+  const md = read("data/pipeline.md");
+  if (!md) return [];
+  return parseInbox(md, readDismissedLeadUrls());
+}
+
+/** Read an intake note referenced by a pipeline row. The reference must stay
+ * inside jds/ after symlink resolution; arbitrary note text can never become a
+ * filesystem read. */
+export function readInboxIntake(job: InboxJob | null): string | null {
+  const ref = job?.note?.match(/(?:^|\s)intake:\s*(jds\/[A-Za-z0-9._-]+\.md)(?:\s|$)/i)?.[1];
+  if (!ref) return null;
+  const root = careerOpsRoot();
+  const file = path.join(root, ref);
+  if (!containedRealpath(file, path.join(root, "jds"))) return null;
+  try { return fs.readFileSync(file, "utf8"); } catch { return null; }
 }
 
 /**
@@ -145,6 +265,22 @@ export function readApplications(): Application[] {
   const md = read("data/applications.md");
   if (!md) return [];
   return parseApplications(md, careerOpsRoot());
+}
+
+export type Contact = { name: string; company: string; type: string; title: string; phone: string; email: string; linkedin: string; tracker: string | null; notes: string };
+
+/** Reads the canonical contact store. It is user-layer PII and is never copied
+ * into a database or an application report. */
+export function readContacts(): Contact[] {
+  const contacts: Contact[] = [];
+  for (const raw of (read("data/contacts.tsv") || "").split("\n")) {
+    if (!raw.trim() || raw.trim().startsWith("#")) continue;
+    const cells = raw.replace(/\r$/, "").split("\t").map((cell) => cell.trim());
+    if (cells.length < 4 || !cells[0] || !cells[1]) continue;
+    const [name, company, type, title, phone = "", email = "", linkedin = "", tracker = "", ...notes] = cells;
+    contacts.push({ name, company, type, title, phone, email, linkedin, tracker: tracker === "-" ? null : tracker || null, notes: notes.join(" ") });
+  }
+  return contacts;
 }
 
 /**
@@ -240,10 +376,37 @@ export function findReportFile(n: string): string | null {
   } catch {
     return null;
   }
-  const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
+  // Reservation sentinels contain allocator metadata (pid/token), not report
+  // prose. They occupy a number but must never be rendered as its report.
+  const match = files.find((f) => f.endsWith(".md") && !/-RESERVED\.md$/i.test(f) && parseInt(f, 10) === target);
   if (!match) return null;
   const p = path.join(root, "reports", match);
   return containedRealpath(p, root) ? p : null;
+}
+
+/** Recover the original posting URL for summary-only tracker rows. Daily-scan
+ * batches can create a scored tracker row without a full report/link; their
+ * source URL remains in scan-history.tsv. Exact company+role matching avoids
+ * guessing between similarly named openings. */
+export function findApplicationSourceUrl(app: Application | null): string | null {
+  if (!app) return null;
+  const tsv = read("data/scan-history.tsv");
+  if (!tsv) return null;
+  const company = app.company.trim().toLowerCase();
+  const role = app.role.trim().toLowerCase();
+  let found: string | null = null;
+  for (const line of tsv.split("\n")) {
+    const cols = line.split("\t");
+    if (cols.length < 6) continue;
+    const [url, , , rowRole, rowCompany, status] = cols;
+    if (
+      /^https?:\/\//i.test(url) &&
+      rowCompany?.trim().toLowerCase() === company &&
+      rowRole?.trim().toLowerCase() === role &&
+      status?.startsWith("added")
+    ) found = url;
+  }
+  return found;
 }
 
 /** True containment check: resolves symlinks before comparing, so a link

@@ -4,13 +4,19 @@
 // can never drift between the two halves. Server-only logic (spawning the scanner,
 // writing temp files) lives in lib/core/{scan,portals,pipeline}.ts.
 
-export type AtsSource = "greenhouse" | "lever" | "ashby" | "workday";
-export const ATS_SOURCES: AtsSource[] = ["greenhouse", "lever", "ashby", "workday"];
+// Mirrors scan-ats-full.mjs's SOURCES map exactly — that script also supports
+// icims (career-ops root, see its `SOURCES.icims` entry), which this list had
+// fallen behind on. Since lib/core/scan.ts's --ats arg is filtered through
+// ATS_SOURCES, a source missing here is silently unreachable from the web no
+// matter what the CLI supports — keep the two in sync when the core adds one.
+export type AtsSource = "greenhouse" | "lever" | "ashby" | "workday" | "icims";
+export const ATS_SOURCES: AtsSource[] = ["greenhouse", "lever", "ashby", "workday", "icims"];
 export const ATS_LABEL: Record<AtsSource, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
   ashby: "Ashby",
   workday: "Workday",
+  icims: "iCIMS",
 };
 
 /** The full UI filter state. The keyword/location lists mirror scan.mjs's
@@ -47,6 +53,14 @@ export type DiscoveredOffer = {
   postedAt: string;
   ats: string;
   source: string;
+  /** Compensation copied from the canonical pipeline row when the source
+   *  provides it. Kept as display text because ranges may be hourly, annual,
+   *  equity-only, or mixed. */
+  compensation?: string;
+  /** Recorded commute mileage from a manually-added prospect, when known. */
+  commuteMiles?: number;
+  /** True when mileage is a geographic estimate rather than user-entered. */
+  commuteApprox?: boolean;
   /** which positive keyword matched the title (transparency, e.g. "ai" in "Nail") */
   matchedKeyword?: string;
   /** optional free-text ranking signal preserved to pipeline.md by the canonical
