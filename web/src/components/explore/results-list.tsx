@@ -11,29 +11,35 @@ import { useExplore } from "./explore-provider";
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, addToPipeline, added, mode } = useExplore();
+  const { companiesScanned, partial, addToPipeline, added, passed, mode } = useExplore();
   const isAi = mode === "ai";
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
 
+  // Passed offers stay out of the count/list entirely — Pass is meant to clear
+  // clutter, not leave a ghost row behind.
+  const visible = useMemo(() => offers.filter((o) => !passed.has(o.url)), [offers, passed]);
+
   const view = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    let list = offers;
+    let list = visible;
     if (needle) list = list.filter((o) => o.title.toLowerCase().includes(needle) || o.company.toLowerCase().includes(needle));
     const sorted = [...list].sort((a, b) =>
       sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
     );
     return sorted;
-  }, [offers, q, sort]);
+  }, [visible, q, sort]);
 
-  const addable = offers.filter((o) => !o.inPipeline && !o.evaluatedN && !added.has(o.url));
+  const addable = visible.filter((o) => !o.inPipeline && !o.evaluatedN && !added.has(o.url));
+  const queued = view.filter((o) => o.inPipeline && !o.evaluatedN);
+  const other = view.filter((o) => !o.inPipeline || !!o.evaluatedN);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <p className="text-sm text-foreground">
-            <span className="font-semibold">{offers.length}</span> {isAi ? `candidate${offers.length === 1 ? "" : "s"}` : `fresh role${offers.length === 1 ? "" : "s"}`}
+            <span className="font-semibold">{visible.length}</span> {isAi ? `candidate${visible.length === 1 ? "" : "s"}` : `fresh role${visible.length === 1 ? "" : "s"}`}
             <CostBadge kind={isAi ? "spend" : "free-network"} size="xs" className="ml-2 align-middle" />
           </p>
           <p className="text-[12px] text-faint">
@@ -77,8 +83,17 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
         </div>
       </div>
 
+      {queued.length > 0 && (
+        <section className="rounded-2xl border border-brand/25 bg-brand-soft/30 p-4">
+          <h2 className="text-sm font-semibold text-foreground">Already in your pipeline</h2>
+          <p className="mb-3 text-xs text-muted">Evaluate to advance these, or dismiss with a reason.</p>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {queued.map((o) => <DiscoveryCard key={o.url} offer={o} inPipeline evaluatedN={o.evaluatedN} />)}
+          </div>
+        </section>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {view.map((o) => (
+        {other.map((o) => (
           <DiscoveryCard key={o.url} offer={o} inPipeline={o.inPipeline} evaluatedN={o.evaluatedN} />
         ))}
       </div>

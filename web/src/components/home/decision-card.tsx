@@ -7,20 +7,34 @@ import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import type { Application } from "@/lib/career-ops";
+import { PassReasonPrompt, rememberPassReason } from "@/components/pass-reason";
 
 // Awaiting-decision row: a scored role with no terminal status. One-tap Apply /
 // Skip writes back through the EXISTING /api/status (UPDATE-only, canonical states).
+// Skip's optional "why" is dual-purpose: it lands in the tracker's Notes cell
+// (audit trail, same as `set-status.mjs --note`) AND — only when a reason is
+// given — as a durable fact via /api/memory, which every future evaluation
+// prompt reads back (see api/run's buildPrompt "Durable notes about the
+// user"). That's the whole feedback loop: say why once, future scores account
+// for it. Both live in modes/_profile.md / data/applications.md — user-layer
+// files a `career-ops update` never touches, so this stays local by default.
 export function DecisionCard({ app }: { app: Application }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
+  const [askingWhy, setAskingWhy] = useState(false);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
 
-  const setStatus = async (status: "Applied" | "Discarded") => {
+  const setStatus = async (status: "Applied" | "Discarded", passReason?: string) => {
     setBusy(status);
     try {
-      await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
+      await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: app.n, status, ...(passReason ? { note: `Passed: ${passReason}` } : {}) }),
+      });
+      if (passReason) rememberPassReason(app.company, app.role, passReason);
       setDone(status);
       router.refresh();
     } catch {
@@ -31,6 +45,17 @@ export function DecisionCard({ app }: { app: Application }) {
   };
 
   if (done) return null;
+
+  if (askingWhy) {
+    return (
+      <PassReasonPrompt
+        company={app.company}
+        busy={busy === "Discarded"}
+        onConfirm={(reason) => setStatus("Discarded", reason)}
+        onCancel={() => setAskingWhy(false)}
+      />
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 transition hover:border-brand/30">
@@ -67,7 +92,7 @@ export function DecisionCard({ app }: { app: Application }) {
         <button
           type="button"
           disabled={!!busy}
-          onClick={() => setStatus("Discarded")}
+          onClick={() => setAskingWhy(true)}
           className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px] max-sm:px-4"
         >
           {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip

@@ -16,13 +16,17 @@ export default function Home() {
   if (phase === "first-run") return <SetupWizard />;
 
   const { inbox, applications } = pipelineSummary();
+  // Seed the client component with the exact string rendered on the server.
+  // Reading the browser clock during its first render can cross midnight (or a
+  // timezone boundary) and change the hydration tree.
+  const dateLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
   // Established / in-between: the dual-loop retention dashboard. Show the setup
   // banner whenever ANY prereq is missing (mirrors the core doctor.mjs), so a
   // portals-missing user is nudged rather than told "all caught up".
   return (
     <>
       {onboardingNeeded && <OnboardingBanner />}
-      <TodayDashboard applications={applications} inbox={inbox} inBetween={phase === "in-between"} />
+      <TodayDashboard applications={applications} inbox={inbox} inBetween={phase === "in-between"} initialDateLabel={dateLabel} />
     </>
   );
 }

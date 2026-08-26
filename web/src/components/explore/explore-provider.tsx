@@ -16,6 +16,13 @@ import {
   type ScanEvent,
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
+import { recordLeadDismissal } from "@/components/pass-reason";
+import { cachedJson } from "@/lib/client-query";
+
+// Shared with inbox-triage.tsx's HIDDEN_KEY — "not interested" is one list
+// regardless of which surface (raw triage inbox, fresh-matches discovery card)
+// the user says it from, so a URL passed here also disappears there.
+const HIDDEN_KEY = "career-ops:hidden";
 
 export type Phase =
   | "idle"
@@ -59,6 +66,12 @@ type ExploreCtx = {
   error: string;
   added: Set<string>;
   adding: Set<string>;
+  /** URLs the user passed on (raw, unscored offers — never in the tracker).
+   *  Persisted to the same "not interested" list the pipeline inbox uses. */
+  passed: Set<string>;
+  /** Hide `offer` from every discovery surface; a reason (optional) becomes a
+   *  durable fact so future evaluations account for it — see pass-reason.tsx. */
+  pass: (offer: DiscoveredOffer, reason?: string, meta?: { source?: "today" | "explore"; inPipeline?: boolean }) => void;
   discover: () => Promise<void>;
   addToPipeline: (offers: DiscoveredOffer[]) => Promise<number>;
   applyPatch: (raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void;
@@ -123,6 +136,44 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState("");
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState<Set<string>>(new Set());
+  const [passed, setPassed] = useState<Set<string>>(new Set());
+
+  // Load the shared "not interested" list once on mount (SSR-safe: localStorage
+  // only exists client-side, so this can't run in the initializer).
+  useEffect(() => {
+    try {
+      const h = localStorage.getItem(HIDDEN_KEY);
+      if (h) setPassed(new Set(JSON.parse(h)));
+    } catch {
+      /* ignore */
+    }
+    // Server-side feedback is the durable source of truth (and survives a new
+    // browser/device). Merge it with legacy local dismissals.
+    cachedJson<{ dismissedUrls?: string[] }>("lead-feedback", "/api/lead-feedback", 60_000)
+      .then((data) => setPassed((current) => new Set([...current, ...(Array.isArray(data.dismissedUrls) ? data.dismissedUrls : [])])))
+      .catch(() => {});
+  }, []);
+
+  const pass = useCallback((offer: DiscoveredOffer, reason?: string, meta?: { source?: "today" | "explore"; inPipeline?: boolean }) => {
+    setPassed((s) => {
+      if (s.has(offer.url)) return s;
+      const next = new Set(s).add(offer.url);
+      try {
+        localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next]));
+      } catch {
+        /* quota — the session-local pass still hides it */
+      }
+      return next;
+    });
+    void recordLeadDismissal({
+      url: offer.url,
+      company: offer.company,
+      role: offer.title,
+      reason,
+      source: meta?.source ?? "explore",
+      inPipeline: meta?.inPipeline ?? false,
+    });
+  }, []);
   const [mode, setModeState] = useState<ExploreMode>("scan");
   const [aiIntent, setAiIntent] = useState("");
   const [aiTrace, setAiTrace] = useState<AiTraceChunk[]>([]);
@@ -497,11 +548,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding,
+      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, passed, pass,
       discover, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, passed, pass, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

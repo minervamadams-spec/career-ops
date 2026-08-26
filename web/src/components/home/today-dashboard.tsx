@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
+import { cachedJson, invalidateClientQuery } from "@/lib/client-query";
+import { Bell, CircleHelp, Sparkles, ArrowRight, BriefcaseBusiness } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
+import { useExplore } from "@/components/explore/explore-provider";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
@@ -22,27 +24,37 @@ export function TodayDashboard({
   applications,
   inbox,
   inBetween,
+  initialDateLabel,
 }: {
   applications: Application[];
   inbox: InboxJob[];
   inBetween: boolean;
+  initialDateLabel: string;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
+  const { passed } = useExplore();
   const router = useRouter();
-  const dateLabel = useMemo(() => new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }), []);
+  // A mount-once useMemo() here went stale if the tab stayed open across
+  // midnight — a real report (still said "Thursday" a day later, no reload
+  // in between). Recomputed from real wall-clock time on an interval instead
+  // of once, so an idle tab self-corrects without needing a manual refresh.
+  const [dateLabel, setDateLabel] = useState(initialDateLabel);
+  useEffect(() => {
+    const refreshDate = () => setDateLabel(new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }));
+    const t = setInterval(refreshDate, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const refetch = useCallback(() => {
-    fetch("/api/followups")
-      .then((r) => r.json())
+    cachedJson<{ entries?: FollowUp[]; metadata?: { overdue?: number } }>("followups", "/api/followups", 30_000)
       .then((d) => {
         setFollowups(Array.isArray(d.entries) ? d.entries : []);
         setOverdue(d.metadata?.overdue ?? d.entries?.length ?? 0);
       })
       .catch(() => {});
-    fetch("/api/whats-new")
-      .then((r) => r.json())
+    cachedJson<{ offers?: DiscoveredOffer[] }>("whats-new", "/api/whats-new", 60_000)
       .then((d) => setFresh(Array.isArray(d.offers) ? d.offers : []))
       .catch(() => {});
   }, []);
@@ -53,6 +65,8 @@ export function TodayDashboard({
     // snapshot (applications/inbox props) + the client loops so the freshly-scored
     // role appears in "Awaiting your decision" without a manual reload.
     const onDone = () => {
+      invalidateClientQuery("followups");
+      invalidateClientQuery("whats-new");
       router.refresh();
       refetch();
     };
@@ -65,10 +79,19 @@ export function TodayDashboard({
     () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
     [applications],
   );
+  const activeApplications = useMemo(
+    () => applications.filter((a) => /^(applied|responded|interview|offer)/i.test(a.status)).slice(0, 8),
+    [applications],
+  );
 
-  const newThisWeek = fresh.length;
+  // A passed-on offer stops counting as a "new match needing attention" — same
+  // rule as any other terminal decision on this dashboard.
+  const visibleFresh = useMemo(() => fresh.filter((o) => !passed.has(o.url)), [fresh, passed]);
+  const newThisWeek = visibleFresh.length;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
+  const pipelineMatches = useMemo(() => visibleFresh.filter((o) => inboxUrls.has(o.url)), [visibleFresh, inboxUrls]);
+  const unqueuedMatches = useMemo(() => visibleFresh.filter((o) => !inboxUrls.has(o.url)), [visibleFresh, inboxUrls]);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
@@ -125,6 +148,26 @@ export function TodayDashboard({
         </Section>
       )}
 
+      {activeApplications.length > 0 && (
+        <Section icon={BriefcaseBusiness} title="Applications in progress" hint="Applied roles and the next stages">
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {activeApplications.map((app) => (
+              <Link
+                key={app.n}
+                href={`/pipeline/${app.n}`}
+                className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-border bg-surface/40 px-3.5 py-3 transition hover:border-brand/30"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-foreground">{app.company}</span>
+                  <span className="block truncate text-xs text-muted">{app.role}</span>
+                </span>
+                <span className="shrink-0 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand">{app.status}</span>
+              </Link>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {/* B. Awaiting your decision */}
       {awaiting.length > 0 && (
         <Section icon={CircleHelp} title="Awaiting your decision" hint="Scored — apply or skip">
@@ -136,17 +179,25 @@ export function TodayDashboard({
         </Section>
       )}
 
+      {pipelineMatches.length > 0 && (
+        <Section icon={CircleHelp} title="In pipeline — choose the next step" hint="Evaluate to advance, or dismiss with a reason">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {pipelineMatches.slice(0, 6).map((o) => <DiscoveryCard key={o.url} offer={o} inPipeline source="today" />)}
+          </div>
+        </Section>
+      )}
+
       {/* C. Fresh matches this week (supply loop) */}
-      {fresh.length > 0 && (
+      {unqueuedMatches.length > 0 && (
         <Section icon={Sparkles} title="Fresh matches this week" hint="Found by your free scans · 0 tokens">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {fresh.slice(0, 6).map((o) => (
-              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
+            {unqueuedMatches.slice(0, 6).map((o) => (
+              <DiscoveryCard key={o.url} offer={o} inPipeline={false} source="today" />
             ))}
           </div>
-          {fresh.length > 6 && (
+          {unqueuedMatches.length > 6 && (
             <Link href="/explore" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
-              See all {fresh.length} →
+              See all {unqueuedMatches.length} →
             </Link>
           )}
         </Section>

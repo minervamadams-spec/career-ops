@@ -11,13 +11,13 @@ import { atomicWrite } from "@/lib/core/safe-write";
 // value with table-breaking chars (| \r \n **) that would scramble the row; detect
 // the Status column from the header (8- and 9-col layouts); atomic write.
 export async function POST(req: Request) {
-  let body: { n?: string; status?: string };
+  let body: { n?: string; status?: string; note?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
-  const { n, status } = body;
+  const { n, status, note: rawNote } = body;
   if (!n || typeof status !== "string" || !status.trim()) {
     return NextResponse.json({ error: "n and status required" }, { status: 400 });
   }
@@ -28,6 +28,14 @@ export async function POST(req: Request) {
   if (!canon) {
     return NextResponse.json({ error: `not a canonical status: ${status}` }, { status: 400 });
   }
+  // Optional free-text reason (e.g. "why I'm passing on this one"). Sanitized
+  // the same way set-status.mjs's cell() helper treats free text headed for a
+  // table cell — strip table-breaking chars rather than reject, since this is
+  // a reason the user typed, not a controlled value like status.
+  const note =
+    typeof rawNote === "string" && rawNote.trim()
+      ? rawNote.replace(/[\r\n]+/g, " ").replace(/\s*\|\s*/g, " / ").trim().slice(0, 300)
+      : null;
 
   const file = path.join(careerOpsRoot(), "data", "applications.md");
   let md: string;
@@ -38,20 +46,25 @@ export async function POST(req: Request) {
   }
 
   const lines = md.split("\n");
-  // Find the Status column index from the header row (robust to 8- vs 9-col).
+  // Find the Status (and, if present, Notes) column index from the header row
+  // (robust to 8- vs 9-col). Defaults mirror the legacy fixed layout.
   let statusIdx = 6;
+  let notesIdx: number | null = 9;
   for (const l of lines) {
     if (!l.trim().startsWith("|")) continue;
     const cells = l.split("|").map((c) => c.trim().toLowerCase());
     const idx = cells.findIndex((c) => c === "status");
     if (idx > 0) {
       statusIdx = idx;
+      const nIdx = cells.findIndex((c) => c === "notes");
+      notesIdx = nIdx > 0 ? nIdx : null;
       break;
     }
     if (/^:?-{2,}:?$/.test(cells[1] ?? "")) break; // hit the separator → no header match, keep default
   }
 
   let changed = false;
+  let noteApplied = false;
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim().startsWith("|")) continue;
     const parts = lines[i].split("|");
@@ -59,8 +72,20 @@ export async function POST(req: Request) {
     if (parts[1].trim() !== String(n)) continue;
     if (statusIdx >= parts.length - 1) continue; // guard malformed row
     parts[statusIdx] = ` ${canon} `;
-    lines[i] = parts.join("|");
     changed = true;
+    // Idempotent, delimiter-aware append — same rule set-status.mjs's --note
+    // uses — so a retried request never duplicates the same reason.
+    if (note && notesIdx != null) {
+      while (parts.length <= notesIdx) parts.push("");
+      const existing = (parts[notesIdx] ?? "").trim();
+      const hasNote =
+        existing === note || existing.startsWith(`${note}; `) || existing.endsWith(`; ${note}`) || existing.includes(`; ${note}; `);
+      if (!hasNote) {
+        parts[notesIdx] = ` ${existing && existing !== "—" && existing !== "-" ? `${existing}; ${note}` : note} `;
+        noteApplied = true;
+      }
+    }
+    lines[i] = parts.join("|");
     break;
   }
   if (!changed) return NextResponse.json({ error: "row not found" }, { status: 404 });
@@ -70,5 +95,5 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, status: canon });
+  return NextResponse.json({ ok: true, status: canon, noteApplied });
 }

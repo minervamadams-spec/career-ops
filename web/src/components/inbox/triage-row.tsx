@@ -1,12 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Loader2, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Loader2, X, Eye } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
+import { PassReasonPrompt } from "@/components/pass-reason";
+import { JobCardSignals } from "@/components/job-card-signals";
 import { cn } from "@/lib/cn";
 
 export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean };
@@ -42,15 +45,24 @@ export function TriageRow({
   shortlisted: boolean;
   onToggleSelect: () => void;
   onSave: () => void;
-  onSkip: () => void;
+  onSkip: (reason?: string) => void;
 }) {
   const ago = agoLabel(age);
   const evaluated = !!scored && (scored.running || scored.score != null);
+  const [askingWhy, setAskingWhy] = useState(false);
+
+  if (askingWhy) {
+    return (
+      <li className="px-3 py-2.5 sm:px-4">
+        <PassReasonPrompt company={job.company} onConfirm={(reason) => onSkip(reason)} onCancel={() => setAskingWhy(false)} />
+      </li>
+    );
+  }
 
   return (
     <li
       className={cn(
-        "flex items-center gap-2.5 px-3 py-2.5 transition-colors sm:gap-3 sm:px-4",
+        "grid grid-cols-[auto_auto_minmax(0,1fr)] items-start gap-2.5 px-3 py-3 transition-colors sm:gap-3 sm:px-4",
         selected ? "bg-brand-soft/50" : "hover:bg-surface-hover",
         evaluated && "opacity-95",
       )}
@@ -66,38 +78,41 @@ export function TriageRow({
 
       <CompanyLogo name={job.company} size={20} />
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0">
         <p className="truncate text-sm">
           <span className="font-medium text-foreground">{job.company}</span>
           <span className="text-muted"> · {job.role}</span>
         </p>
-        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
-          {job.location && <span className="truncate">{job.location}</span>}
-          {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
-          {ago && <span>{ago}</span>}
-          {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
+        <JobCardSignals
+          className="mt-1.5"
+          location={job.location}
+          compensation={job.compensation}
+          commuteMiles={job.commuteMiles}
+          commuteApprox={job.commuteApprox}
+          sourceLabel={source ? ATS_LABEL[source] : undefined}
+          ageLabel={ago ?? undefined}
+        >
+          <span className="font-medium text-brand/80">In pipeline</span>
           {!evaluated && <span className="italic text-muted">not scored</span>}
-        </p>
-      </div>
+        </JobCardSignals>
 
-      {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
-      {evaluated ? (
-        <Link href={`/jobs/${scored!.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs">
-          {scored!.running ? (
-            <>
-              <Loader2 className="size-3.5 animate-spin text-brand" />
-              <span className="text-brand max-sm:hidden">Scoring…</span>
-            </>
-          ) : (
-            <Badge tone={scored!.tone}>{scored!.score}/5</Badge>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-job-card-actions>
+          {evaluated && (
+            <Link href={`/jobs/${scored!.jobId}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-brand-soft px-2.5 text-xs font-medium text-brand">
+              {scored!.running ? <><Loader2 className="size-3.5 animate-spin" /> Scoring…</> : <Badge tone={scored!.tone}>{scored!.score}/5</Badge>}
+            </Link>
           )}
-        </Link>
-      ) : (
-        <div className="flex shrink-0 items-center gap-1">
-          <button
+          <Link
+            href={`/pipeline/inbox?url=${encodeURIComponent(job.url)}`}
+            title="View prospect details and application options"
+            className="inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-brand max-sm:min-h-[44px]"
+          >
+            <Eye className="size-4" /><span className="max-sm:hidden">View</span>
+          </Link>
+          {!evaluated && <button
             type="button"
             onClick={onSave}
-            title={shortlisted ? "In your shortlist" : "Save to shortlist"}
+            title={shortlisted ? "In your scoring shortlist" : "Shortlist for scoring"}
             aria-pressed={shortlisted}
             className={cn(
               "inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px] max-sm:min-w-[44px]",
@@ -105,18 +120,18 @@ export function TriageRow({
             )}
           >
             {shortlisted ? <BookmarkCheck className="size-4" /> : <Bookmark className="size-4" />}
-            <span className="max-sm:hidden">{shortlisted ? "Saved" : "Save"}</span>
-          </button>
+            <span className="max-sm:hidden">{shortlisted ? "Shortlisted" : "Shortlist"}</span>
+          </button>}
           <button
             type="button"
-            onClick={onSkip}
-            title="Skip — hide from the inbox"
-            className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
+            onClick={() => setAskingWhy(true)}
+            title="Dismiss — remove from the inbox"
+            className="inline-flex min-h-9 items-center justify-center gap-1 rounded-md px-2.5 text-xs text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px]"
           >
-            <X className="size-4" />
+            <X className="size-4" /> Dismiss
           </button>
         </div>
-      )}
+      </div>
     </li>
   );
 }

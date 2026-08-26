@@ -6,10 +6,11 @@ import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
-import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { daysSince, isUsLocation, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
+import { rememberPassReason } from "@/components/pass-reason";
 import { cn } from "@/lib/cn";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
@@ -21,7 +22,7 @@ const BATCH = 20;
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
 // role relevant — order is freshness with a single documented plug point.
-export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
+export function InboxTriage({ inbox, country }: { inbox: InboxJob[]; country: string | null }) {
   const { jobs, startJob } = useJobs();
 
   // facets
@@ -31,6 +32,12 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
   const [showAll, setShowAll] = useState(false);
+  // Defaults ON only when the profile's own location.country says United
+  // States — never hardcoded, read from config/profile.yml (career-ops.ts's
+  // readProfileConfig). Toggle-able per session; "Clear" restores this default
+  // rather than forcing every non-US posting back in.
+  const defaultUsOnly = useMemo(() => !!country && /united states|\busa\b|\bu\.s\.a?\.?\b/i.test(country), [country]);
+  const [usOnly, setUsOnly] = useState(defaultUsOnly);
 
   // persisted triage state + ephemeral selection/undo
   const [shortlist, setShortlist] = useState<ShortItem[]>([]);
@@ -118,17 +125,23 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
         if (locQ.trim() && !(e.job.location || "").toLowerCase().includes(locQ.trim().toLowerCase())) return false;
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
+        if (usOnly && !isUsLocation(e.job.location)) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw],
+    [enriched, hidden, within, sources, seniorities, locQ, kw, usOnly],
   );
 
-  // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
-  // A smarter ranker replaces ONLY this comparator; facets/triage/shortlist/score never
-  // touch relevance. This is the whole firewall in one line.
-  const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
+  // 🔴 SINGLE ORDER PLUG POINT — hand-added/intake prospects first, then
+  // freshness. A manual prospect represents explicit user intent and must not
+  // disappear below a 20-row scan batch when hundreds of automated rows land.
+  // Within each tier this remains freshness-only; no fake relevance score.
+  const ordered = useMemo(() => [...filtered].sort((a, b) => {
+    const aManual = /(?:^|\s)intake:/i.test(a.job.note || "") ? 1 : 0;
+    const bManual = /(?:^|\s)intake:/i.test(b.job.note || "") ? 1 : 0;
+    return (bManual - aManual) || ((a.age ?? Infinity) - (b.age ?? Infinity));
+  }), [filtered]);
 
-  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
+  const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "" || usOnly !== defaultUsOnly;
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
@@ -139,9 +152,13 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     if (isShortlisted(job.url)) return;
     setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
   };
-  const skip = (job: InboxJob) => {
+  const skip = (job: InboxJob, reason?: string) => {
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
     setUndo({ label: `Skipped ${job.company}`, fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
+    // Reason capture only — the hide/undo mechanics above are unchanged, and
+    // nothing here touches the 🔴 freshness-only order comparator further
+    // down. A reason just becomes a durable fact future evaluations read.
+    if (reason) rememberPassReason(job.company, job.role, reason);
   };
   const toggleSelect = (url: string) =>
     setSelected((s) => {
@@ -192,19 +209,24 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         setLocQ={setLocQ}
         kw={kw}
         setKw={setKw}
+        usOnly={usOnly}
+        toggleUsOnly={() => setUsOnly((v) => !v)}
         availSources={availSources}
         availSeniorities={availSeniorities}
         resultCount={filtered.length}
         totalCount={enriched.length - hiddenCount}
         anyActive={anyFacet}
-        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
+        onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); setUsOnly(defaultUsOnly); }}
       />
 
       {/* batch header: fresh slice by default, or the full filtered set */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
-        <p className="text-sm font-medium text-foreground">
-          {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
-        </p>
+        <div>
+          <p className="text-sm font-medium text-foreground">
+            {capped ? "Your prospects, then fresh matches" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
+          </p>
+          {capped && <p className="mt-0.5 text-xs text-faint">Hand-added jobs stay pinned above the automated scan results.</p>}
+        </div>
         {hiddenCount > 0 && (
           <button type="button" onClick={() => setHidden([])} className="text-xs text-faint transition-colors hover:text-foreground">
             {hiddenCount} hidden · restore
@@ -238,7 +260,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               shortlisted={isShortlisted(e.job.url)}
               onToggleSelect={() => toggleSelect(e.job.url)}
               onSave={() => save(e.job)}
-              onSkip={() => skip(e.job)}
+              onSkip={(reason) => skip(e.job, reason)}
             />
           ))}
         </ul>

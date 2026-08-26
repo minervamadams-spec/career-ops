@@ -21,6 +21,8 @@ export function FacetChips({
   setLocQ,
   kw,
   setKw,
+  usOnly,
+  toggleUsOnly,
   availSources,
   availSeniorities,
   resultCount,
@@ -38,6 +40,8 @@ export function FacetChips({
   setLocQ: (v: string) => void;
   kw: string;
   setKw: (v: string) => void;
+  usOnly: boolean;
+  toggleUsOnly: () => void;
   availSources: AtsSource[];
   availSeniorities: Seniority[];
   resultCount: number;
@@ -82,6 +86,10 @@ export function FacetChips({
             </button>
           ))}
         </div>
+
+        <Pill on={usOnly} onClick={toggleUsOnly}>
+          US only
+        </Pill>
 
         {availSources.map((s) => (
           <Pill key={s} on={sources.has(s)} onClick={() => toggleSource(s)}>

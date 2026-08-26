@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, readApplications } from "@/lib/career-ops";
+import { careerOpsRoot, readApplications, readDismissedLeadUrls, readInbox, readProfileConfig } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
+import { estimateCommuteMiles } from "@/lib/commute-distance.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,12 +26,20 @@ export async function GET(req: Request) {
 
   // Companies already evaluated → don't resurface as "new".
   const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
+  const dismissed = readDismissedLeadUrls();
+  const inboxByUrl = new Map(readInbox().map((job) => [job.url, job]));
+  const { commuteZip } = readProfileConfig();
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
     if (!url || !/^https?:\/\//i.test(url)) return null;
+    if (dismissed.has(url)) return null;
     if (status && /skipped|expired/i.test(status)) return null;
     if (company && evaluated.has(norm(company))) return null;
+    const inbox = inboxByUrl.get(url);
+    const commute = inbox?.location?.match(/(?:^|[,·]\s*)(\d+(?:\.\d+)?)\s*mi\b/i);
+    const recordedMiles = commute ? Number(commute[1]) : undefined;
+    const estimatedMiles = recordedMiles == null ? estimateCommuteMiles(location, commuteZip) : null;
     return {
       url,
       company: (company || "").trim(),
@@ -39,6 +48,9 @@ export async function GET(req: Request) {
       postedAt: /^\d{4}-\d{2}-\d{2}$/.test(firstSeen || "") ? firstSeen : "",
       ats: (portal || "").replace(/-full$/, "").trim() || "other",
       source: "whats-new",
+      compensation: inbox?.compensation,
+      commuteMiles: recordedMiles ?? estimatedMiles ?? undefined,
+      commuteApprox: recordedMiles == null && estimatedMiles != null,
     };
   };
 
