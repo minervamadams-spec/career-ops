@@ -1,5 +1,7 @@
 # Personal data (user fills these)
 cv.md
+.env.save
+cv-variants/
 article-digest.md
 local/
 # Everything under data/ is generated or personal at runtime — only .gitkeep
@@ -53,6 +55,14 @@ interview-prep/sessions/*
 writing-samples/*
 !writing-samples/README.md
 
+# Career document vault (real résumé/cover-letter drafts — PII, never commit).
+# Was missing entirely until 2026-08-14, caught when package-for-distribution.sh
+# shipped all 148 real files (names, addressed cover letters) in a zip meant for
+# someone else. Only the generic template/instructions files ship.
+cv-inputs/*
+!cv-inputs/README.md
+!cv-inputs/default.md
+
 # User config and customization (never auto-updated)
 config/profile.yml
 config/cv-facts.json
@@ -85,8 +95,13 @@ bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
 
-# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
+# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs (*.bak)
+# and by lib/core/safe-write.ts's atomicWriteWithBackup, which timestamps
+# instead (*.bak-{ISO timestamp}) — *.bak alone didn't match that suffix, so
+# config/profile.yml.bak-* (real name/email) shipped in a distribution zip on
+# 2026-08-14 before this second pattern was added.
 *.bak
+*.bak-*
 
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json
@@ -98,6 +113,7 @@ data/model-blacklist.json
 
 # CLI-specific local config
 .claude/settings.local.json
+.claude/launch.json
 .claude/memory/
 .opencode/settings.local.json
 .opencode/memory/
@@ -112,6 +128,8 @@ package-lock.json
 .playwright-mcp/
 test-results/
 playwright-report/
+data/tool-activity.jsonl
+data/tool-activity-window.json
 
 # Planning (local scratchpad)
 plan/
@@ -123,3 +141,4 @@ plan/
 # (see DATA_CONTRACT.md). Re-include them past the unanchored user-layer
 # patterns above (cv.md, portals.yml).
 !test-fixtures/**
+data/agent-inbox.md
