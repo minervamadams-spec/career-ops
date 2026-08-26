@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   const company = String(body.company ?? "").trim().slice(0, 160);
   const role = String(body.role ?? "").trim().slice(0, 200);
   const reason = String(body.reason ?? "").trim().replace(/\s+/g, " ").slice(0, 300);
-  const source = body.source === "today" ? "today" : "explore";
+  const source = body.source === "today" ? "today" : body.source === "pipeline" ? "pipeline" : "explore";
   if (!/^https?:\/\//i.test(url) || !company || !role) return NextResponse.json({ error: "url, company and role required" }, { status: 400 });
 
   const category = CATEGORIES.find(([pattern]) => pattern.test(reason))?.[1] ?? (reason ? "other" : "unspecified");

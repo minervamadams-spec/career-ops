@@ -110,7 +110,7 @@ async function readAsync(rel: string): Promise<string | null> {
 export async function readInboxAsync(): Promise<InboxJob[]> {
   const [md, feedback] = await Promise.all([readAsync("data/pipeline.md"), readAsync("data/lead-feedback.jsonl")]);
   if (!md) return [];
-  return parseInbox(md, parseDismissedLeadUrls(feedback));
+  return parseInbox(md, parseDismissedLeadUrls(feedback), parseLocationExcludedCompanies(feedback));
 }
 
 export async function readApplicationsAsync(): Promise<Application[]> {
@@ -152,6 +152,36 @@ export function readDismissedLeadUrls(): Set<string> {
   return parseDismissedLeadUrls(read("data/lead-feedback.jsonl"));
 }
 
+const normCompany = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Companies passed on for a "location" reason (too far, not actually remote,
+ *  on-site, relocation) — a location constraint is fixed per employer, not
+ *  per posting, so this is the one pass category safe to generalize into a
+ *  standing exclusion. Distinct from data/blacklist.md, which stays a
+ *  strictly user-curated, never-auto-populated file (see its template) — this
+ *  set is machine-derived from data/lead-feedback.jsonl, the same durable log
+ *  readDismissedLeadUrls already reads. */
+function parseLocationExcludedCompanies(raw: string | null): Set<string> {
+  const companies = new Set<string>();
+  if (!raw) return companies;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { category?: unknown; company?: unknown };
+      if (entry.category === "location" && typeof entry.company === "string" && entry.company.trim()) {
+        companies.add(normCompany(entry.company));
+      }
+    } catch {
+      /* see parseDismissedLeadUrls */
+    }
+  }
+  return companies;
+}
+
+export function readLocationExcludedCompanies(): Set<string> {
+  return parseLocationExcludedCompanies(read("data/lead-feedback.jsonl"));
+}
+
 export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; commuteMiles?: number; commuteApprox?: boolean; note?: string; done: boolean; postedAt?: string };
 
 /** A pipeline-row segment like `posted: 2026-07-14`, `trust: 62 stale` or
@@ -168,7 +198,7 @@ const LABELED_SEGMENT = /^([a-z][a-z_-]*):\s*(.*)$/i;
  *  (posted:/trust:/note:/…) are filtered out of positional assignment wherever
  *  they appear and surfaced when useful (posted: → postedAt). Unknown labels
  *  and further trailing columns are ignored gracefully. */
-function parseInbox(md: string, dismissed: Set<string>): InboxJob[] {
+function parseInbox(md: string, dismissed: Set<string>, excludedCompanies: Set<string> = new Set()): InboxJob[] {
   const jobs: InboxJob[] = [];
   for (const line of md.split("\n")) {
     const m = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)$/);
@@ -197,13 +227,24 @@ function parseInbox(md: string, dismissed: Set<string>): InboxJob[] {
       postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
     });
   }
-  return dismissed.size ? jobs.filter((job) => !dismissed.has(job.url)) : jobs;
+  // Indeed's redirect links (to.indeed.com/...) mint a fresh URL for the same
+  // real posting on every re-scrape, so URL-based done-tracking alone lets an
+  // already-handled job reappear as a brand-new pending row under a new URL —
+  // "I've gone through these before, they keep showing up." Backfill: once ANY
+  // row for a given company+title has been checked off, treat every row that
+  // shares it as done too, regardless of which URL each was scraped under.
+  const normKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const handled = new Set(jobs.filter((j) => j.done).map((j) => `${normKey(j.company)}|${normKey(j.role)}`));
+  for (const job of jobs) {
+    if (!job.done && handled.has(`${normKey(job.company)}|${normKey(job.role)}`)) job.done = true;
+  }
+  return jobs.filter((job) => !dismissed.has(job.url) && !excludedCompanies.has(normCompany(job.company)));
 }
 
 export function readInbox(): InboxJob[] {
   const md = read("data/pipeline.md");
   if (!md) return [];
-  return parseInbox(md, readDismissedLeadUrls());
+  return parseInbox(md, readDismissedLeadUrls(), readLocationExcludedCompanies());
 }
 
 /** Read an intake note referenced by a pipeline row. The reference must stay

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, readApplications, readDismissedLeadUrls, readInbox, readProfileConfig } from "@/lib/career-ops";
+import { careerOpsRoot, readApplications, readDismissedLeadUrls, readInbox, readLocationExcludedCompanies, readProfileConfig } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { estimateCommuteMiles } from "@/lib/commute-distance.mjs";
 import { workArrangementFromLocation } from "@/lib/format";
@@ -28,6 +28,7 @@ export async function GET(req: Request) {
   // Companies already evaluated → don't resurface as "new".
   const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
   const dismissed = readDismissedLeadUrls();
+  const locationExcluded = readLocationExcludedCompanies();
   const inboxByUrl = new Map(readInbox().map((job) => [job.url, job]));
   const { commuteZip, maxCommuteMiles } = readProfileConfig();
 
@@ -37,6 +38,10 @@ export async function GET(req: Request) {
     if (dismissed.has(url)) return null;
     if (status && /skipped|expired|rejected/i.test(status)) return null;
     if (company && evaluated.has(norm(company))) return null;
+    // A "location" pass (too far, not actually remote, on-site) is a fixed
+    // per-employer fact, not a per-posting one — generalize it so the same
+    // company's next posting doesn't resurface as if it were new.
+    if (company && locationExcluded.has(norm(company))) return null;
     const inbox = inboxByUrl.get(url);
     const commute = inbox?.location?.match(/(?:^|[,·]\s*)(\d+(?:\.\d+)?)\s*mi\b/i);
     const recordedMiles = commute ? Number(commute[1]) : undefined;

@@ -10,7 +10,7 @@ import { daysSince, isUsLocation, seniorityFromTitle, sourceFromUrl, SENIORITY_O
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
-import { rememberPassReason } from "@/components/pass-reason";
+import { recordLeadDismissal, rememberPassReason } from "@/components/pass-reason";
 import { cn } from "@/lib/cn";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
@@ -164,6 +164,11 @@ export function InboxTriage({ inbox, country }: { inbox: InboxJob[]; country: st
     // nothing here touches the 🔴 freshness-only order comparator further
     // down. A reason just becomes a durable fact future evaluations read.
     if (reason) rememberPassReason(job.company, job.role, reason);
+    // Durable server-side dismissal — the `hidden` list above is a per-browser
+    // localStorage hide only. Without this, a skip here never reaches
+    // data/lead-feedback.jsonl, so it can't suppress the same job resurfacing
+    // in Today's whats-new feed, on another device, or after a cache clear.
+    void recordLeadDismissal({ url: job.url, company: job.company, role: job.role, reason, source: "pipeline", inPipeline: true });
   };
   const toggleSelect = (url: string) =>
     setSelected((s) => {

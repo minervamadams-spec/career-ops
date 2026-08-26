@@ -15,7 +15,7 @@ export type LeadFeedback = {
   company: string;
   role: string;
   reason?: string;
-  source: "today" | "explore";
+  source: "today" | "explore" | "pipeline";
   inPipeline: boolean;
 };
 
