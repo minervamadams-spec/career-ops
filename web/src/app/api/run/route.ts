@@ -43,6 +43,34 @@ End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it he
 
 Target: ${input}`;
   }
+  if (kind === "keywords") {
+    return `You are acting as a senior technical recruiter reviewing the user's OWN resume, headless, on their machine. Read cv.md and config/profile.yml (their stated target roles/archetypes are context, not a ceiling — surface real adjacent fits too).
+
+List the top 20 job titles they are most qualified for RIGHT NOW, ranked by strength of fit against ACTUAL demonstrated experience — not aspiration, not titles they merely wish for. For each title give, on one line: the title, then a dash, then the exact ATS keywords/phrases a resume targeting that title should use — comma-separated, drawn from real wording or content already in cv.md. NEVER invent a skill, tool, or metric that isn't genuinely there; reformulate real experience, don't fabricate.
+
+Format as a numbered list, most-qualified first, one title per line:
+1. {Title} — {keyword, keyword, keyword, ...}
+2. ...
+
+No preamble, no closing summary — the list IS the output.${mem}
+
+End with EXACTLY one final line: VERDICT: {5}/5 — {"20 titles ranked" or however many were genuinely supportable}`;
+  }
+  if (kind === "intake") {
+    return `The user answered some "get to know you" onboarding questions to strengthen their job-search materials, headless, on their machine. Integrate their answers into the RIGHT user-layer files per AGENTS.md's Data Contract — never modes/_shared.md or any system-layer file:
+
+- A "superpower" / what makes them unique → config/profile.yml narrative.superpowers (append, don't duplicate or remove existing entries)
+- What excites/drains them, deal-breakers → modes/_profile.md (a clearly-labeled section; create the file from modes/_profile.template.md first if it doesn't exist)
+- Best professional achievement → config/profile.yml narrative.proof_points (append)
+- Published projects/articles/case studies → article-digest.md (create it if missing)
+
+Rules: reformulate what they actually said, never invent or embellish a claim. Preserve every existing field/value in files you edit — this is an addition, not a rewrite. Skip any question they left blank. Do not touch cv.md.
+
+Their answers:
+${input}
+${mem}
+End with EXACTLY one final line: VERDICT: {5 if at least one file was updated, else 1}/5 — {which file(s) you updated, ≤12 words}`;
+  }
   if (kind === "pdf") {
     // The agent tailors content only — it never renders the PDF itself. Rendering
     // launches a real browser, which an agent CLI's own sandbox may block with no
@@ -185,7 +213,7 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf" || kind === "outreach") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf" || kind === "outreach" || kind === "keywords") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -286,7 +314,12 @@ export async function POST(req: Request) {
           // user beforehand) — no WebFetch/WebSearch, no Bash/Edit, just enough
           // to read cv.md/the report and write the one draft file.
           ? { allowed: "Read,Write,Glob,Grep", disallowed: "Bash,Edit,NotebookEdit,Task,WebFetch,WebSearch" }
-          : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
+          : kind === "intake"
+            // Edits existing user-layer files in place (profile.yml/_profile.md/
+            // article-digest.md) from answers already given — no research needed,
+            // no shell needed, just surgical Read+Edit(+Write for a missing file).
+            ? { allowed: "Read,Write,Edit,Glob,Grep", disallowed: "Bash,NotebookEdit,Task,WebFetch,WebSearch" }
+            : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude
     ? ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
        "--permission-mode", "acceptEdits",

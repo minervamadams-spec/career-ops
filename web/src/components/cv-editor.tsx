@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { TitleKeywordsPanel } from "@/components/cv/title-keywords-panel";
+import { IntakeQuestions } from "@/components/cv/intake-questions";
 
 export function CvEditor() {
   const [content, setContent] = useState("");
@@ -96,6 +98,9 @@ export function CvEditor() {
           </article>
         </div>
       )}
+
+      {exists && loaded && <TitleKeywordsPanel />}
+      <IntakeQuestions />
     </div>
   );
 }
