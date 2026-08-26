@@ -21,9 +21,20 @@ const activeEvaluationUrls: Set<string> =
 // (reserve-report-num.mjs → reports/ → batch/tracker-additions/ → merge-tracker.mjs),
 // so a web evaluation is byte-identical to a CLI one (single source of truth, no
 // drift). kind "research" stays read-only. Streams progress as NDJSON events.
-type BuildPromptArgs = { kind: string; input: string; memory: string; today: string; pdfPaths?: PdfPaths; reportFile?: string; variant?: string };
+type BuildPromptArgs = {
+  kind: string;
+  input: string;
+  memory: string;
+  today: string;
+  pdfPaths?: PdfPaths;
+  reportFile?: string;
+  variant?: string;
+  outreachPath?: string;
+  contactName?: string;
+  contactTitle?: string;
+};
 
-function buildPrompt({ kind, input, memory, today, pdfPaths, reportFile, variant }: BuildPromptArgs): string {
+function buildPrompt({ kind, input, memory, today, pdfPaths, reportFile, variant, outreachPath, contactName, contactTitle }: BuildPromptArgs): string {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging.${mem}
@@ -49,6 +60,23 @@ Target: ${input}`;
 Do NOT run generate-pdf.mjs yourself and do NOT render a PDF — the platform renders it after you finish, from the HTML and format file you wrote. Do NOT touch data/applications.md — the platform updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
 End with EXACTLY one final line: VERDICT: {5 if the HTML and format file were written, else 1}/5 — {a one-line summary, ≤12 words}`;
+  }
+  if (kind === "outreach") {
+    // The contact is already confirmed (name + title came from the report's
+    // saved contact, not a fresh lookup), so this skips modes/contacto.md's
+    // WebSearch discovery step entirely and goes straight to drafting — no
+    // WebFetch/WebSearch granted below, deliberately.
+    return `You are drafting ONE outreach message for application #${input}, headless, on the user's machine. Follow modes/contacto.md's "LinkedIn power move" persona engine EXACTLY — but skip step 1 (contact discovery), the contact is already confirmed:
+  Name: ${contactName || "(name not given)"}
+  Title: ${contactTitle || "(title not given)"}
+
+1. Read modes/contacto.md, cv.md, config/profile.yml, and the evaluation report at ${reportFile} (for the role's specifics and why it's a fit).
+2. Classify the contact type from their title (Recruiter / Hiring Manager / Peer / Interviewer) — default to Hiring Manager if the title doesn't clearly say otherwise.
+3. Write the 3-sentence message for that persona, ≤300 characters total, in modes/contacto.md's voice (no corporate-speak, no "I'm passionate about", never share a phone number). Reformulate REAL experience from cv.md only — never invent a skill, metric, or claim.
+4. Write ONLY the message itself (no preamble, no quotes around it, no character count) to EXACTLY this path: ${outreachPath}
+Do NOT save this contact anywhere, do NOT touch data/contacts.tsv, do NOT open or post to LinkedIn, do NOT send or submit anything — this is a draft the user reviews and sends themselves.${memory}
+
+End with EXACTLY one final line: VERDICT: {5 if the draft was written, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "fix-bug") {
     // Replaces the old "file a GitHub issue on the upstream repo" flow
@@ -101,16 +129,21 @@ Posting URL: ${input}`;
 }
 
 export async function POST(req: Request) {
-  let body: { kind?: string; input?: string; cliId?: string; variant?: string };
+  let body: { kind?: string; input?: string; cliId?: string; variant?: string; contactName?: string; contactTitle?: string };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
-  const { kind = "evaluate", input, cliId, variant: rawVariant } = body;
+  const { kind = "evaluate", input, cliId, variant: rawVariant, contactName: rawContactName, contactTitle: rawContactTitle } = body;
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
+  // Free text that only ever reaches a prompt argv entry (never a shell, never
+  // a filename) — capped the same way lead-feedback's reason field is, not
+  // filename-validated like `variant` above.
+  const contactName = typeof rawContactName === "string" ? rawContactName.trim().slice(0, 160) : undefined;
+  const contactTitle = typeof rawContactTitle === "string" ? rawContactTitle.trim().slice(0, 200) : undefined;
   if (kind === "evaluate" && activeEvaluationUrls.has(input)) {
     return Response.json({ error: "This listing is already being evaluated in the background." }, { status: 409 });
   }
@@ -139,7 +172,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", outreach: "modes/contacto.md" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -152,9 +185,15 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf" || kind === "outreach") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  if (kind === "outreach" && !findReportFile(input)) {
+    return new Response(
+      JSON.stringify({ error: "No evaluation report found for this application yet — evaluate it first." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -195,7 +234,35 @@ export async function POST(req: Request) {
     }
   }
 
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths, reportFile: pdfReportFile, variant });
+  // Same deterministic-path + clear-before-run discipline as pdfPaths above,
+  // scaled down: one small text file, no render step, no format decision.
+  let outreachPath: string | undefined;
+  let outreachReportFile: string | undefined;
+  if (kind === "outreach") {
+    outreachReportFile = findReportFile(input) ?? undefined;
+    const safeN = input.replace(/[^a-zA-Z0-9_-]/g, "");
+    const dir = path.join(careerOpsRoot(), "output", "outreach");
+    fs.mkdirSync(dir, { recursive: true });
+    outreachPath = path.join(dir, `${safeN}.txt`);
+    try {
+      fs.rmSync(outreachPath, { force: true });
+    } catch (err) {
+      console.warn(`Failed to clear stale outreach draft ${outreachPath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const prompt = buildPrompt({
+    kind,
+    input,
+    memory: readMemory(),
+    today,
+    pdfPaths,
+    reportFile: kind === "outreach" ? outreachReportFile : pdfReportFile,
+    variant,
+    outreachPath,
+    contactName,
+    contactTitle,
+  });
 
   const isClaude = cliId === "claude";
   const isCodex = cliId === "codex";
@@ -214,7 +281,12 @@ export async function POST(req: Request) {
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : kind === "pdf"
         ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
-        : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
+        : kind === "outreach"
+          // Contact discovery is already done (the contact was confirmed by the
+          // user beforehand) — no WebFetch/WebSearch, no Bash/Edit, just enough
+          // to read cv.md/the report and write the one draft file.
+          ? { allowed: "Read,Write,Glob,Grep", disallowed: "Bash,Edit,NotebookEdit,Task,WebFetch,WebSearch" }
+          : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude
     ? ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
        "--permission-mode", "acceptEdits",
@@ -538,6 +610,10 @@ export async function POST(req: Request) {
           // Produced output (maybe even a report) but did NOT finish cleanly — flag it
           // instead of recording a confident score off a half-finished run.
           send({ type: "error", msg: "This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify." });
+        } else if (kind === "outreach" && !(outreachPath && fs.existsSync(outreachPath) && fs.statSync(outreachPath).size > 0)) {
+          // Same honesty-gate shape as pdf's wroteHtml check — a clean exit alone
+          // doesn't prove the draft file actually landed on disk.
+          send({ type: "error", msg: "This run didn't produce a draft message — re-run it to verify." });
         } else {
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         }

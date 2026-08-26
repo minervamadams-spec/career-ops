@@ -25,7 +25,19 @@ export type Job = {
   reportId?: string; // saved evaluation in Pipeline; links the worker to its useful result
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; variant?: string };
+type StartOpts = {
+  title: string;
+  subtitle?: string;
+  kind: string;
+  input: string;
+  page?: string;
+  batchId?: string;
+  variant?: string;
+  /** kind "outreach" only: the confirmed contact's name/title, so the draft
+   *  skips contact-discovery entirely and just writes the message. */
+  contactName?: string;
+  contactTitle?: string;
+};
 
 type Ctx = {
   jobs: Job[];
@@ -149,7 +161,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             }).catch(() => {});
             // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
             // worker just wrote a real tracker row / report they don't yet see.
-            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
+            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf" || opts.kind === "outreach")) {
               window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
             }
           }
@@ -161,7 +173,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           const res = await fetch("/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId: runCliId, variant: opts.variant }),
+            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId: runCliId, variant: opts.variant, contactName: opts.contactName, contactTitle: opts.contactTitle }),
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
