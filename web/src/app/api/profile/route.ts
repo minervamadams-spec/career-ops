@@ -22,11 +22,23 @@ type ProfilePatch = {
   compMax?: number;
   currency?: string;
   remote?: string;
+  weeklyJobsTarget?: number;
+  applyingDaysTarget?: number;
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
+
+// Genuinely generic, non-personal defaults for a brand-new profile.yml — no
+// claim about who the person is, where they live, what they earn, or what
+// they want. Contrast with config/profile.example.yml, which is a full
+// fictional person meant for a human to read, not to seed a real file from.
+const SAFE_DEFAULTS: Record<string, unknown> = {
+  language: { output: "en" },
+  spend_tier: "standard",
+  cv: { output_format: "html" },
+};
 
 /** Deep-merge src onto dst (objects recurse; arrays/scalars replace). Non-mutating. */
 function deepMerge(dst: unknown, src: Record<string, unknown>): Record<string, unknown> {
@@ -50,6 +62,11 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
   if (p.currency) comp.currency = p.currency;
   if (p.remote) comp.location_flexibility = p.remote;
   if (Object.keys(comp).length) out.compensation = comp;
+  // weekly_targets + tracks — see AGENTS.md's "track=" notes convention and
+  // the board's weekly-goals widget (/api/stats/week reads these).
+  if (p.weeklyJobsTarget && p.applyingDaysTarget) {
+    out.weekly_targets = { jobs_added_per_week: p.weeklyJobsTarget, applying_days_per_week: p.applyingDaysTarget };
+  }
   // seniority intentionally not written (no canonical home in profile.yml);
   // archetypes/narrative live in modes/_profile.md — this writer never touches them.
   return out;
@@ -73,12 +90,19 @@ export async function POST(req: Request) {
   // "no profile yet" (safe to seed from the example) from "profile EXISTS but is
   // malformed" (NEVER overwrite — that would silently destroy the user's data).
   if (!fs.existsSync(file)) {
-    try {
-      base = (yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8")) as Record<string, unknown>) || {};
-      seeded = Object.keys(base).length > 0;
-    } catch {
-      base = {};
-    }
+    // Deliberately NOT seeded from config/profile.example.yml: that file
+    // ships a full FICTIONAL person (a made-up name/phone/salary/location/
+    // narrative/exit-story, even a fake Spanish-learning goal) meant for a
+    // human reading the file directly to see the shape. Machine-seeding
+    // from it put fabricated biographical content in a real person's file
+    // sitting right next to their real name/email (caught in the setup
+    // wizard's fresh-checkout test, 2026-08-13 — a Denver-based test user's
+    // file came back with San Francisco/PST and someone else's comp
+    // figures). SAFE_DEFAULTS below has only genuinely generic settings —
+    // no claim about a specific person — that every install reasonably
+    // starts with; everything else comes from what the user actually enters.
+    base = SAFE_DEFAULTS;
+    seeded = true;
   } else {
     let parsed: unknown;
     try {
