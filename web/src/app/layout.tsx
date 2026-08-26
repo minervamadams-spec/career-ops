@@ -1,14 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { inter, instrumentSerif, instrumentSerifItalic } from "@/lib/fonts";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "career-ops — official web experience",
-  description: "The official, local-first web experience for career-ops.",
+  title: "Offerly — your job search command center",
+  description: "A local-first job search command center — built on career-ops (MIT licensed), renamed and customized.",
   // Home-screen / standalone (iOS): let our theme-color flow up to the status bar
   // + Dynamic Island; safe-area insets handle the layout.
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "career-ops" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Offerly" },
 };
 
 export const viewport: Viewport = {
@@ -33,7 +34,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >
       <body className="font-sans antialiased">
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* `children` makes React 19 encounter a literal script node while it
+            hydrates this Server Component. Next's supported inline-script form
+            preserves before-paint execution without client-rendered children. */}
+        <Script id="theme-script" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <AppShell>{children}</AppShell>
       </body>
     </html>
