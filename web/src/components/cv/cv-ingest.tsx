@@ -153,7 +153,12 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       setPhase("review");
       return;
     }
-    onSaved?.();
+    if (onSaved) {
+      // Caller (e.g. the setup wizard) owns navigation from here — don't yank
+      // them into the Explorer mid-flow, or later wizard steps never run.
+      onSaved();
+      return;
+    }
     // WOW #1 — land in the Explorer with the CV-derived filters in the URL + run=1,
     // so the Explorer auto-fires the FREE scan itself (robust, no push/replaceState race).
     // GENEROUS first scan so it never comes back empty (that would kill the wow): roles
