@@ -14,6 +14,7 @@ import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
+import { HumanReviewSources } from "@/components/human-review-sources";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const CLI_NAMES: Record<string, string> = {
@@ -229,6 +230,7 @@ export function ExplorerView({
             />
           )}
           {phase === "failed" && <FailedCard msg={error || status} onRetry={() => void discover()} />}
+          <div className="mt-6"><HumanReviewSources roles={filters.positive} /></div>
         </>
       )}
     </div>
