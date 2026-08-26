@@ -41,6 +41,7 @@ test("resolvePdfPaths: happy path builds html/meta/finalPdf from report + profil
     assert.equal(result.ok, true);
     assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
     assert.equal(result.paths.meta, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.meta.json"));
+    assert.equal(result.paths.reportNum, "018");
     assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-acme-2026-07-26.pdf"));
   } finally {
     rmSync(root, { recursive: true, force: true });

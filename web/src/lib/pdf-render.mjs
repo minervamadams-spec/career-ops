@@ -139,7 +139,7 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, repo
   }
 
   const render = await spawnGeneratePdf({ spawnFn, execPath, root, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
-  cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
+  cleanupPdfScratch(path.dirname(pdfPaths.html), `${path.basename(pdfPaths.html, ".html")}.`);
 
   if (!render.ok) {
     return { kind: "render-failed", error: render.stderr || "PDF rendering failed." };

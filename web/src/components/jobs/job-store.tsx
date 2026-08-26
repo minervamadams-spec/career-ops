@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
+import { configuredRunCli } from "@/lib/run-failure.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -21,9 +22,10 @@ export type Job = {
   cost?: { tokens: number; usd?: number }; // per-run token cost (Claude result event) — local only
   startedAt: number;
   endedAt?: number;
+  reportId?: string; // saved evaluation in Pipeline; links the worker to its useful result
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; variant?: string };
 
 type Ctx = {
   jobs: Job[];
@@ -121,6 +123,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       }
 
       (async () => {
+        const runCliId = configuredRunCli(cliId);
         let text = "";
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
         let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
@@ -153,10 +156,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         };
 
         try {
+          // Honor the engine selected in Config. Silently substituting Claude
+          // made a configured Codex run inherit Claude's timeout/auth failures.
           const res = await fetch("/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId }),
+            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId: runCliId, variant: opts.variant }),
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
@@ -193,6 +198,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   // finish happens on stream-close; capture the per-run cost it carries
                   if (typeof ev.tokens === "number") doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
+                } else if (ev.type === "artifact" && typeof ev.reportId === "string") {
+                  patch(id, (j) => ({ ...j, reportId: ev.reportId }));
                 } else if (ev.type === "error") {
                   finish("error", ev.msg || "Error");
                   return;

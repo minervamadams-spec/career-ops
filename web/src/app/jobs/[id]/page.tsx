@@ -4,14 +4,14 @@ import { use } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, Wrench, CircleDot, Check, X, FileText, ChevronDown } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { jobs } = useJobs();
+  const { jobs, startJob } = useJobs();
   const job = jobs.find((j) => j.id === id);
 
   if (!job) {
@@ -53,11 +53,33 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               {job.result.summary && <span className="text-sm text-muted">{job.result.summary}</span>}
             </div>
           )}
+          {job.status === "done" && job.kind === "evaluate" && (
+            <div className="mt-5 rounded-xl border border-brand/25 bg-brand-soft/50 p-4">
+              <p className="text-sm font-medium text-foreground">Your evaluation is in Pipeline</p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                Pipeline is Offerly&apos;s application tracker. It contains the score, decision brief, strongest matches, gaps, compensation, risks, and full evidence.
+              </p>
+              {job.reportId ? (
+                <Link href={`/pipeline/${job.reportId}`} className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground">
+                  <FileText className="size-4" /> View evaluation <ArrowRight className="size-4" />
+                </Link>
+              ) : (
+                <Link href="/pipeline" className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground">
+                  Open Pipeline <ArrowRight className="size-4" />
+                </Link>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
-      <ol className="mt-6 space-y-2">
-        {job.steps.map((s, i) => (
+      <details className="group mt-6 rounded-xl border border-border bg-surface/30">
+        <summary className="flex min-h-[48px] cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm text-muted">
+          Technical activity · {job.steps.length} steps
+          <ChevronDown className="ml-auto size-4 transition-transform group-open:rotate-180" />
+        </summary>
+        <ol className="space-y-2 border-t border-border px-4 py-3">
+          {job.steps.map((s, i) => (
           <li key={i} className="flex items-start gap-2.5 text-sm">
             {s.kind === "tool" ? (
               <Wrench className="mt-0.5 size-3.5 shrink-0 text-brand" />
@@ -68,21 +90,34 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               {s.kind === "tool" ? `Using ${s.label}` : s.label}
             </span>
           </li>
-        ))}
+          ))}
         {job.status === "running" && (
           <li className="flex items-center gap-2.5 text-sm text-muted">
             <Loader2 className="size-3.5 animate-spin text-brand" /> thinking…
           </li>
         )}
-      </ol>
+        </ol>
+      </details>
 
       {job.text && (
-        <div className="mt-8">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Output</h2>
-          <div className="report-prose mt-3 rounded-2xl border border-border bg-surface/40 p-5">
+        <details className="group mt-4 rounded-xl border border-border bg-surface/30">
+          <summary className="flex min-h-[48px] cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm text-muted">
+            Worker transcript
+            <ChevronDown className="ml-auto size-4 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="report-prose border-t border-border px-5 py-4">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{job.text}</ReactMarkdown>
           </div>
-        </div>
+        </details>
+      )}
+      {job.status === "error" && job.kind && job.input && (
+        <button
+          type="button"
+          onClick={() => startJob({ title: job.title, subtitle: job.subtitle, kind: job.kind!, input: job.input!, page: job.page, batchId: job.batchId })}
+          className="mt-6 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground"
+        >
+          Retry in background
+        </button>
       )}
     </div>
   );

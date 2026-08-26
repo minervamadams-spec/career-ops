@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { companyDomain, companyInitials, monogramHue } from "@/lib/company";
 import { cn } from "@/lib/cn";
+import { useBatchedLogo } from "@/lib/logo-client";
 
 const CONFIG_KEY = "career-ops:config";
 
@@ -21,7 +22,6 @@ export function CompanyLogo({
   className?: string;
 }) {
   const [enabled, setEnabled] = useState(false); // monogram-only until config known
-  const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -35,9 +35,10 @@ export function CompanyLogo({
   }, []);
 
   const domain = companyDomain(name);
+  const { src, pending } = useBatchedLogo(enabled && domain ? { kind: "domain", value: domain } : null);
   const hue = monogramHue(name);
   const radius = Math.max(4, Math.round(size * 0.28));
-  const showImg = enabled && !!domain && !failed;
+  const showImg = enabled && !!domain && !!src;
 
   return (
     <span
@@ -58,18 +59,18 @@ export function CompanyLogo({
       {showImg && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`/api/logo?domain=${encodeURIComponent(domain!)}`}
+          src={src!}
           alt=""
           width={size}
           height={size}
           loading="lazy"
           referrerPolicy="no-referrer"
           onLoad={() => setLoaded(true)}
-          onError={() => setFailed(true)}
           className="absolute inset-0 h-full w-full bg-white object-contain transition-opacity duration-200"
           style={{ opacity: loaded ? 1 : 0, padding: Math.max(1, Math.round(size * 0.1)) }}
         />
       )}
+      {enabled && pending && <span className="sr-only">Loading logo</span>}
     </span>
   );
 }

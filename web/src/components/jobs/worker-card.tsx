@@ -22,12 +22,12 @@ const STEP_LABELS: Record<string, string> = {
 };
 const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
 
-// Auth/sign-in failures are the most common real error — detect them so we can give
-// a concrete next step instead of a dead end (#8).
+// Only show auth guidance when the backend reports authentication explicitly.
+// Generic process/timeout failures must not be relabelled as sign-in failures.
 function isAuthError(job: Job): boolean {
   if (job.status !== "error") return false;
   const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
-  return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
+  return /authentication problem|authentication failed|sign[ -]?in required|unauthorized|not authenticated/.test(hay);
 }
 
 const fmtElapsed = (ms: number): string => {
@@ -122,13 +122,13 @@ export function WorkerCard({
         )}
       </div>
       {(bottom || running) && (
-        <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
+        <div title={bottom} className={cn("mt-1 text-faint", job.status === "error" ? "line-clamp-3" : "truncate", inline ? "text-xs" : "text-[10px]")}>
           {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          Sign your CLI in from Config, then re-run.
+          Sign in with the CLI itself, then re-run.
         </div>
       )}
       {tokens > 0 && (

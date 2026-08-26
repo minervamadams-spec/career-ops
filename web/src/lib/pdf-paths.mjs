@@ -24,6 +24,7 @@ export function slugify(s) {
  * @property {string} html - Backend-dictated path the agent must write the tailored HTML to.
  * @property {string} meta - Backend-dictated path the agent must write the {"format": ...} sidecar to.
  * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
+ * @property {string} reportNum - Canonical report number linked by the tracker row.
  */
 
 /**
@@ -60,6 +61,7 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     return { ok: false, error: `No report #${input} found — evaluate this posting first.` };
   }
   const companyMatch = path.basename(reportFile).match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
+  const reportNum = path.basename(reportFile).match(/^(\d+)-/)?.[1] ?? input;
   const companySlug = companyMatch ? companyMatch[1] : "company";
   let candidateSlug = "candidate";
   try {
@@ -85,6 +87,7 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
       html: path.join(scratchDir, `cv-web-${input}.html`),
       meta: path.join(scratchDir, `cv-web-${input}.meta.json`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
+      reportNum,
     },
   };
 }

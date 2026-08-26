@@ -161,6 +161,37 @@ export function issueBody(d: Diag, description: string): string {
     .slice(0, 6000);
 }
 
+/** Same scrubbed, structural diagnostic data as issueBody() — reused as the
+ *  context block for the "fix it locally" flow (kind "fix-bug" in
+ *  api/run/route.ts) instead of a GitHub issue body. No title/labels (not a
+ *  GitHub payload), otherwise identical content and the same non-personal
+ *  guarantee: no CV, profile, application answers, or job URLs. */
+export function fixBugContext(d: Diag, description: string): string {
+  const s = d.shape;
+  const fmt = (n?: number) => (typeof n === "number" ? String(n) : "?");
+  const shapeLines = s
+    ? [
+        `- **Setup:** ${s.setup?.phase || "?"}${s.setup?.missing?.length ? ` · missing: ${s.setup.missing.join(", ")}` : ""}`,
+        `- **Inbox:** ${fmt(s.data?.inbox?.parsed)}/${fmt(s.data?.inbox?.candidates)} rows parsed · **Tracker:** ${fmt(s.data?.tracker?.parsed)}/${fmt(s.data?.tracker?.candidates)} rows parsed`,
+        `- **Reports:** ${fmt(s.data?.reports)} · **PDFs:** ${fmt(s.data?.pdfs)} · **Follow-ups engine:** ${d.followupsAvailable === null ? "?" : d.followupsAvailable ? "ok" : "DEGRADED"}`,
+        `- **Core capabilities:** scan --json ${s.capabilities?.scanJson ? "yes" : "no"} · tracker delete ${s.capabilities?.trackerDelete ? "yes" : "no"}`,
+      ]
+    : [];
+  return [
+    "## What the user reported",
+    scrub(description).trim() || "_(no description given)_",
+    "",
+    "## Environment",
+    `- **Screen:** \`${d.route}\``,
+    `- **Version:** \`${d.version || "?"}\`${d.coreVersion ? ` · core \`${d.coreVersion}\`` : ""} · ${d.channel}${d.sha ? ` · \`${d.sha}\`` : ""}`,
+    `- **CLI:** ${d.cli || "—"}`,
+    ...shapeLines,
+    "",
+    "## Recent client errors",
+    d.logs.length ? "```\n" + d.logs.join("\n") + "\n```" : "_(none captured)_",
+  ].join("\n");
+}
+
 export function issueUrl(d: Diag, description: string): string {
   const title = `[web ${d.channel}] ${(scrub(description) || "bug report").replace(/\s+/g, " ").trim().slice(0, 70)}`;
   const params = new URLSearchParams({ title, body: issueBody(d, description), labels: "web-alpha,area:web" });

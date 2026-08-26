@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { cachedJson } from "@/lib/client-query";
 
 type Usage = { window5h: { tokens: number }; window7d: { tokens: number } };
 
@@ -40,8 +41,7 @@ export function UsageMeter() {
   useEffect(() => {
     let alive = true;
     const load = () =>
-      fetch("/api/usage")
-        .then((r) => r.json())
+      cachedJson<Usage>("usage", "/api/usage", 60_000)
         .then((d) => {
           if (alive) setData(d);
         })

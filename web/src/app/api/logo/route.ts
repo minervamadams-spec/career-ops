@@ -37,11 +37,11 @@ function companyDomains(company: string): string[] {
 
 /** Fetch a real favicon for one domain (Google's tokenless service). Returns the
  *  bytes, or null for a miss (Google serves a tiny globe placeholder for misses). */
-async function fetchFavicon(domain: string): Promise<ArrayBuffer | null> {
+async function fetchFavicon(domain: string, signal?: AbortSignal): Promise<ArrayBuffer | null> {
   try {
     const res = await fetch(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`, {
       headers: { Accept: "image/*" },
-      signal: AbortSignal.timeout(3500),
+      signal,
       redirect: "follow",
     });
     if (!res.ok) return null;
@@ -90,10 +90,23 @@ export async function GET(req: NextRequest) {
   }
 
   // 2) resolve once: first candidate domain that yields a real favicon wins
+  // Logo misses used to try five domains serially at 3.5s each, leaving the
+  // browser's loading indicator spinning for ~17s per unknown company. Race
+  // candidates under one short shared budget; the monogram is already visible.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1200);
   let bytes: ArrayBuffer | null = null;
-  for (const d of candidates) {
-    bytes = await fetchFavicon(d);
-    if (bytes) break;
+  try {
+    bytes = await Promise.any(
+      candidates.map(async (candidate) => {
+        const result = await fetchFavicon(candidate, controller.signal);
+        if (!result) throw new Error("miss");
+        return result;
+      }),
+    ).catch(() => null);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
 
   try {
@@ -105,4 +118,38 @@ export async function GET(req: NextRequest) {
 
   if (!bytes) return new Response("no logo", { status: 404 });
   return new Response(bytes, { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" } });
+}
+
+type BatchRequest = { kind: "domain" | "company"; value: string };
+
+/** Coalesce list-view logo loads into one browser round-trip while reusing the
+ * exact same forever-on-disk resolver as GET. Individual misses remain null. */
+export async function POST(req: NextRequest) {
+  let body: { requests?: BatchRequest[] };
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "invalid json" }, { status: 400 });
+  }
+  const requests = Array.isArray(body.requests) ? body.requests.slice(0, 200) : [];
+  const unique = new Map<string, BatchRequest>();
+  for (const item of requests) {
+    if (!item || !["domain", "company"].includes(item.kind) || typeof item.value !== "string") continue;
+    const value = item.value.trim().slice(0, 253);
+    if (value) unique.set(`${item.kind}:${value.toLowerCase()}`, { kind: item.kind, value });
+  }
+
+  const logos = Object.fromEntries(
+    await Promise.all(
+      [...unique.entries()].map(async ([key, item]) => {
+        const url = new URL("/api/logo", req.nextUrl.origin);
+        url.searchParams.set(item.kind, item.value);
+        const response = await GET(new NextRequest(url));
+        if (!response.ok) return [key, null];
+        const bytes = Buffer.from(await response.arrayBuffer());
+        return [key, `data:${response.headers.get("Content-Type") ?? "image/png"};base64,${bytes.toString("base64")}`];
+      }),
+    ),
+  );
+  return Response.json({ logos }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -6,10 +6,14 @@ import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf } from "@/lib/pdf-render.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { classifyRunFailure, isAuthenticationDiagnostic } from "@/lib/run-failure.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
+
+const activeEvaluationUrls: Set<string> =
+  (globalThis as typeof globalThis & { __careerOpsActiveEvaluations?: Set<string> }).__careerOpsActiveEvaluations ??= new Set<string>();
 
 // The web ORCHESTRATES the real career-ops engine — it does NOT reimplement it.
 // kind "evaluate" runs the REAL modes/oferta.md and persists the canonical
@@ -17,9 +21,9 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // (reserve-report-num.mjs → reports/ → batch/tracker-additions/ → merge-tracker.mjs),
 // so a web evaluation is byte-identical to a CLI one (single source of truth, no
 // drift). kind "research" stays read-only. Streams progress as NDJSON events.
-type BuildPromptArgs = { kind: string; input: string; memory: string; today: string; pdfPaths?: PdfPaths };
+type BuildPromptArgs = { kind: string; input: string; memory: string; today: string; pdfPaths?: PdfPaths; reportFile?: string; variant?: string };
 
-function buildPrompt({ kind, input, memory, today, pdfPaths }: BuildPromptArgs): string {
+function buildPrompt({ kind, input, memory, today, pdfPaths, reportFile, variant }: BuildPromptArgs): string {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging.${mem}
@@ -33,15 +37,39 @@ Target: ${input}`;
     // launches a real browser, which an agent CLI's own sandbox may block with no
     // human present to approve an escalation (headless/web-triggered run, #2172).
     // The backend (a plain Node process, no CLI sandbox) renders after this closes.
+    const baseCvLine = variant
+      ? `Read modes/pdf.md, cv-variants/${variant} (use THIS as the base CV content instead of cv.md — it's a cv.md-derived variant curated for this posting type), config/profile.yml, and the evaluation report at ${reportFile} (for the JD keywords + analysis).`
+      : `Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${reportFile} (for the JD keywords + analysis).`;
     return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step — follow modes/pdf.md EXACTLY for tailoring (do not improvise a format).
-1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
-2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
+1. ${baseCvLine}
+2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary or content already present in the base CV read in step 1.
 3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to EXACTLY this path: ${pdfPaths?.html}
 4. Decide the page format for this company (letter for US/Canada, else a4) and write EXACTLY this JSON (nothing else) to EXACTLY this path: ${pdfPaths?.meta}
    {"format": "letter"} or {"format": "a4"}
 Do NOT run generate-pdf.mjs yourself and do NOT render a PDF — the platform renders it after you finish, from the HTML and format file you wrote. Do NOT touch data/applications.md — the platform updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
 End with EXACTLY one final line: VERDICT: {5 if the HTML and format file were written, else 1}/5 — {a one-line summary, ≤12 words}`;
+  }
+  if (kind === "fix-bug") {
+    // Replaces the old "file a GitHub issue on the upstream repo" flow
+    // (2026-08-14) — that made sense for career-ops itself, not for a
+    // renamed fork handed to other people. `input` is the diagnostic block
+    // built client-side by lib/report/report.ts's fixBugContext() (same
+    // scrubbed, non-personal data the old GitHub issue carried: route,
+    // recent client errors, data-shape counts — never cv.md/profile/answers).
+    return `A user hit a bug in this web app and reported it from inside the app, headless, on their own machine. Find the real cause and fix it in the source — don't just work around the symptom.
+
+${input}
+
+Your job:
+1. From the screen (route above) and the recent client errors, find the relevant source under web/src/ — or the core .mjs scripts if the error/data-shape points at core logic, not the web layer.
+2. Reproduce or clearly explain the root cause before changing anything.
+3. Fix it directly in the source.
+4. Verify: run \`npx tsc --noEmit\` inside web/ and confirm no new type errors. If the fix touched a core .mjs script with its own tests, run those too.
+5. Do NOT touch any user data files (cv.md, config/profile.yml, data/*, portals.yml, cv-variants/*, reports/*, output/*, jds/*) — this is a code-only fix.
+6. Summarize what was wrong and exactly what you changed (file:line).
+
+End with EXACTLY one final line: VERDICT: {5 if fixed and verified, 3 if fixed but unverified, 1 if you couldn't reproduce or fix it}/5 — {one-line summary of the fix, ≤12 words}`;
   }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
@@ -64,7 +92,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
@@ -73,15 +101,32 @@ Posting URL: ${input}`;
 }
 
 export async function POST(req: Request) {
-  let body: { kind?: string; input?: string; cliId?: string };
+  let body: { kind?: string; input?: string; cliId?: string; variant?: string };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
-  const { kind = "evaluate", input, cliId } = body;
+  const { kind = "evaluate", input, cliId, variant: rawVariant } = body;
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
+  }
+  if (kind === "evaluate" && activeEvaluationUrls.has(input)) {
+    return Response.json({ error: "This listing is already being evaluated in the background." }, { status: 409 });
+  }
+  // Re-validate against the real directory listing rather than trusting the
+  // client string as-is — this filename ends up interpolated into a prompt
+  // the spawned agent reads, so it's re-checked the same way a file path
+  // would be anywhere else in this route, not just loosely sanitized.
+  let variant: string | undefined;
+  if (kind === "pdf" && rawVariant) {
+    try {
+      const variantsDir = path.join(careerOpsRoot(), "cv-variants");
+      const known = fs.readdirSync(variantsDir).filter((f) => f.endsWith(".md") && f !== "README.md");
+      if (known.includes(rawVariant)) variant = rawVariant;
+    } catch {
+      /* cv-variants/ doesn't exist — variant stays undefined, falls back to cv.md */
+    }
   }
   const resolved = resolveCli(cliId);
   if (!resolved) {
@@ -119,7 +164,9 @@ export async function POST(req: Request) {
   // Precompute deterministic scratch + final paths so the agent never chooses
   // its own filenames — the backend owns naming and, later, rendering (#2172).
   let pdfPaths: PdfPaths | undefined;
+  let pdfReportFile: string | undefined;
   if (kind === "pdf") {
+    pdfReportFile = findReportFile(input) ?? undefined;
     const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
     if (!pathsResult.ok) {
       return new Response(JSON.stringify({ error: pathsResult.error }), {
@@ -148,9 +195,10 @@ export async function POST(req: Request) {
     }
   }
 
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, pdfPaths, reportFile: pdfReportFile, variant });
 
   const isClaude = cliId === "claude";
+  const isCodex = cliId === "codex";
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate'/'fix-portal' run the REAL mode + persist canonical
   // artifacts → they need Write + Bash (reserve-report-num / merge-tracker /
@@ -165,7 +213,7 @@ export async function POST(req: Request) {
     kind === "evaluate" || kind === "fix-portal"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : kind === "pdf"
-        ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Glob,Grep", disallowed: "Bash,Task,NotebookEdit" }
+        ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
         : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude
     ? ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
@@ -177,20 +225,24 @@ export async function POST(req: Request) {
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
   const reportsDir = path.join(careerOpsRoot(), "reports");
-  const countReports = () => {
+  const reportNames = () => {
     try {
-      return fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md")).length;
+      return new Set(fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md") && !/-RESERVED\.md$/i.test(f)));
     } catch {
-      return 0;
+      return new Set<string>();
     }
   };
   const persists = kind === "evaluate";
-  const reportsBefore = persists ? countReports() : 0;
+  const reportsBefore = persists ? reportNames() : new Set<string>();
   // Tracker-mutating runs hold a write token so a row delete can't race their merge
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  if (kind === "evaluate") activeEvaluationUrls.add(input);
+  // Explicitly close stdin. Claude Code otherwise waits for piped input, emits
+  // "no stdin data received in 3s", and can exit 1 even though the prompt was
+  // correctly supplied via -p.
+  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
   const enc = new TextEncoder();
 
   // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
@@ -198,6 +250,8 @@ export async function POST(req: Request) {
   // otherwise a late enqueue onto a closed controller throws uncaught (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
+  let artifactPoll: ReturnType<typeof setInterval> | undefined;
+  let timedOut = false;
   // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
   // after the agent child closes — and even after a client disconnect fires
   // cancel(). Track its promise so cancel() can defer releasing writeToken
@@ -216,8 +270,10 @@ export async function POST(req: Request) {
       let buf = "";
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false;
+      let diagnostics = "";
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
+      let pdfRenderStarted = false;
       // pdf-mode's agent only tailors content now (rendering moved to the
       // backend, #2172) — but its killMs still has to leave real headroom
       // inside the route's overall maxDuration (800s): the render+mark phase
@@ -227,8 +283,10 @@ export async function POST(req: Request) {
       // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
       // a Chromium PDF render normally takes low tens of seconds even with a
       // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
+      const killMs = kind === "pdf" || kind === "evaluate" ? 600_000 : 285_000;
       killer = setTimeout(() => {
+        timedOut = true;
+        send({ type: "status", label: "Time limit reached — stopping safely" });
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
       const send = (obj: unknown) => {
@@ -239,13 +297,81 @@ export async function POST(req: Request) {
         if (!closed) {
           closed = true;
           if (killer) clearTimeout(killer);
+          if (artifactPoll) clearInterval(artifactPoll);
+          if (kind === "evaluate") activeEvaluationUrls.delete(input);
           releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }
         }
       };
 
+      // Give immediate confirmation that the local process launched. Some CLIs
+      // take a while to initialize before their first stdout event.
+      send({ type: "status", label: `Started ${spec.name}` });
+
+      // Agents sometimes persist the complete report + tracker row and then
+      // continue researching or composing, leaving the UI spinning for many
+      // minutes after the useful work is done. The artifacts are the source of
+      // truth: once both exist, finish the worker immediately and stop the
+      // redundant agent process.
+      if (kind === "evaluate") {
+        artifactPoll = setInterval(() => {
+          const after = reportNames();
+          const fresh = [...after].find((name) => !reportsBefore.has(name));
+          if (!fresh) return;
+          let tracker = "";
+          try { tracker = fs.readFileSync(path.join(careerOpsRoot(), "data", "applications.md"), "utf8"); } catch { return; }
+          if (!tracker.includes(fresh)) return;
+          let score = "";
+          let reason = "";
+          try {
+            const reportText = fs.readFileSync(path.join(reportsDir, fresh), "utf8");
+            score = reportText.match(/^\*\*Score:\*\*\s*([0-5](?:\.\d+)?)\/5/im)?.[1] ?? "";
+            reason = reportText
+              .match(/^\|\s*TL;?DR\s*\|\s*(.*?)\s*\|\s*$/im)?.[1]
+              ?.replace(/[*_`]/g, "")
+              .trim() ?? "";
+          } catch { /* report existence was already verified */ }
+          const reportId = fresh.match(/^(\d+)/)?.[1]?.replace(/^0+(?=\d)/, "") ?? "";
+          if (reportId) send({ type: "artifact", reportId });
+          if (score) send({ type: "text", text: `\nVERDICT: ${score}/5 — ${reason || "Evaluation saved in Pipeline"}\n` });
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          try { child.kill("SIGTERM"); } catch { /* already exited */ }
+          close();
+        }, 1_000);
+      }
+
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
+        if (isCodex) {
+          buf += d.toString();
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) !== -1) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            try {
+              const ev = JSON.parse(line) as { type?: string; item?: { type?: string; text?: string; command?: string }; message?: string };
+              if (ev.type === "item.started" && ev.item?.type) send({ type: "status", label: ev.item.type === "command_execution" ? "Saving evaluation artifacts" : "Working on evaluation" });
+              if (ev.type === "item.completed") {
+                if (ev.item?.type === "agent_message" && ev.item.text) {
+                  emittedText = true;
+                  send({ type: "text", text: ev.item.text });
+                } else if (ev.item?.type === "command_execution") {
+                  send({ type: "tool", name: "Bash" });
+                }
+              }
+              if (ev.type === "error" && ev.message) {
+                sawError = true;
+                diagnostics += `${ev.message}\n`;
+              }
+            } catch {
+              // Preserve unexpected Codex output as useful diagnostics.
+              emittedText = true;
+              send({ type: "text", text: line + "\n" });
+            }
+          }
+          return;
+        }
         if (!isClaude) {
           emittedText = true;
           send({ type: "text", text: d.toString() });
@@ -284,11 +410,17 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        // Widened: auth/login/quota failures are the most common real error and
-        // the old narrow regex missed them (silent false "success").
-        if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
+        // Codex emits optional MCP/plugin startup warnings to stderr (for
+        // example an unauthenticated Stripe connector) even when the requested
+        // task completes successfully. Its --json stdout and exit code are the
+        // authoritative task channel; treating unrelated plugin noise as a
+        // failed evaluation caused real reports to be rejected after minutes.
+        if (isCodex) return;
+        diagnostics += s;
+        // Authentication diagnostics are useful, but don't terminate the UI
+        // on stderr alone: several CLIs print recoverable startup warnings.
+        if (isAuthenticationDiagnostic(s)) {
           sawError = true;
-          send({ type: "error", msg: s.trim().slice(0, 200) });
         }
       });
       // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
@@ -313,7 +445,7 @@ export async function POST(req: Request) {
             execPath: process.execPath,
             root: careerOpsRoot(),
             pdfPaths: paths,
-            reportNum: input,
+            reportNum: paths.reportNum,
           });
           if (result.kind === "render-failed") {
             send({ type: "error", msg: result.error.slice(0, 200) });
@@ -330,21 +462,39 @@ export async function POST(req: Request) {
         }
       };
 
+      if (kind === "pdf" && pdfPaths) {
+        artifactPoll = setInterval(() => {
+          if (pdfRenderStarted || closed) return;
+          const ready = [pdfPaths!.html, pdfPaths!.meta].every((p) => {
+            try { return fs.statSync(p).size > 0; } catch { return false; }
+          });
+          if (!ready) return;
+          pdfRenderStarted = true;
+          if (artifactPoll) clearInterval(artifactPoll);
+          if (killer) clearTimeout(killer);
+          try { child.kill("SIGTERM"); } catch { /* already exited */ }
+          pdfRenderPromise = renderPdf(pdfPaths!);
+        }, 1_000);
+      }
+
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         // A client disconnect can fire cancel() (which kills `child`) before
         // this event finally arrives — killing a process doesn't make its
         // 'close' event disappear, just delays it. Without this guard a pdf
         // run could still start a brand-new render (and re-touch the tracker)
         // after the stream — and its writeToken guard — is already gone.
-        if (closed) return;
+        if (closed || pdfRenderStarted) return;
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
         // Shared by both honesty gates below: a CLI that produced no output at
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
         const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) return "The CLI exited with an error — is it installed and authenticated?";
-          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
+          if (timedOut || isAuthenticationDiagnostic(diagnostics)) {
+            return classifyRunFailure({ timedOut, timeoutMs: killMs, diagnostics, code, signal, emittedText }).message;
+          }
+          if (!cleanExit) return classifyRunFailure({ timedOut, timeoutMs: killMs, diagnostics, code, signal, emittedText }).message;
+          if (!emittedText && !sawError) return "The CLI exited successfully but produced no evaluation output. Run it directly to check its headless mode, then retry.";
           return null;
         };
 
@@ -372,7 +522,8 @@ export async function POST(req: Request) {
           return close();
         }
 
-        const wroteReport = countReports() > reportsBefore;
+        const reportsAfter = reportNames();
+        const wroteReport = [...reportsAfter].some((name) => !reportsBefore.has(name));
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
@@ -382,7 +533,7 @@ export async function POST(req: Request) {
         } else if (persists && !wroteReport) {
           // The worker ran but never wrote the report/tracker row (e.g. a CLI
           // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
+          send({ type: "error", msg: "The evaluation finished without saving its detailed report. Retry it; Codex and Claude Code are both supported." });
         } else if (!cleanExit || sawError) {
           // Produced output (maybe even a report) but did NOT finish cleanly — flag it
           // instead of recording a confident score off a half-finished run.
@@ -395,6 +546,18 @@ export async function POST(req: Request) {
     },
     cancel() {
       closed = true;
+      // An evaluation is a backend artifact-producing job. Navigating away or
+      // reloading the page must not kill it three minutes into the run. Leave
+      // the bounded child alive; its existing kill timer still caps it at
+      // 285s, and release the tracker guard when the process actually exits.
+      if (kind === "evaluate") {
+        child.once("close", () => {
+          activeEvaluationUrls.delete(input);
+          if (artifactPoll) clearInterval(artifactPoll);
+          releaseWriteTokenOnce();
+        });
+        return;
+      }
       if (killer) clearTimeout(killer);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
       if (pdfRenderPromise) {
