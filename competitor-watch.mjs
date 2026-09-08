@@ -84,6 +84,11 @@ export function formatSlackMessage(offers, date) {
   return lines.join('\n');
 }
 
+/** Only technical roles are actionable replacement-risk signals in Slack. */
+export function technicalOffersForAlert(offers) {
+  return offers.filter(offer => offer.classification === 'technical');
+}
+
 export async function notifySlack(offers, date, { webhookUrl = process.env.COMPETITOR_WATCH_SLACK_WEBHOOK_URL, fetchImpl = globalThis.fetch, log = console.log } = {}) {
   if (!offers.length) return { sent: false, reason: 'no-new-postings' };
   if (!webhookUrl) { log('Competitor watch: Slack skipped — COMPETITOR_WATCH_SLACK_WEBHOOK_URL is not set.'); return { sent: false, reason: 'no-webhook' }; }

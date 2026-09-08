@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { classifyTechnical, appendWatchOffers, loadSeenWatchUrls, formatSlackMessage, notifySlack } from '../competitor-watch.mjs';
+import { classifyTechnical, appendWatchOffers, loadSeenWatchUrls, formatSlackMessage, notifySlack, technicalOffersForAlert } from '../competitor-watch.mjs';
 import { normalizeItem } from '../plugins/apify/index.mjs';
 
 test('classifies technical title, description, non-technical, and unknown', () => {
@@ -32,6 +32,7 @@ test('Apify posted_at field maps an ISO posting date to the scanner timestamp', 
 
 test('Slack notifier groups companies, highlights technical roles, and safely no-ops', async () => {
   const offers = [{ url: 'https://example.test/a', company: 'BGIS', title: 'Backend Engineer', postedAt: '2026-09-08', classification: 'technical' }, { url: 'https://example.test/b', company: 'Veritas', title: 'Accountant', classification: 'non-technical' }];
+  assert.deepEqual(technicalOffersForAlert(offers), [offers[0]]);
   assert.match(formatSlackMessage(offers, '2026-09-08'), /\*BGIS\*[\s\S]*⚠️ Technical hire/);
   const logs = []; assert.equal((await notifySlack(offers, '2026-09-08', { log: s => logs.push(s) })).reason, 'no-webhook');
   let payload; const result = await notifySlack(offers, '2026-09-08', { webhookUrl: 'https://hooks.slack.test/x', fetchImpl: async (_u, init) => { payload = JSON.parse(init.body); return { ok: true }; }, log() {} });

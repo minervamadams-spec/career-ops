@@ -13,8 +13,10 @@ go only to `data/competitor-watch.tsv`: they are never written to the personal
 pipeline or scan history, scored, ranked, or sent through application flows.
 Technical-role classification is deterministic and uses the editable
 `technical_keywords` list. Set `COMPETITOR_WATCH_SLACK_WEBHOOK_URL` in `.env`
-to send a new-postings-only Slack incoming-webhook alert; without it, scans log
-one skip message and otherwise complete normally.
+to send a new-technical-postings-only Slack incoming-webhook alert; every new
+posting remains in the isolated TSV, while non-technical postings stay out of
+Slack. Without the webhook, scans log one skip message and otherwise complete
+normally.
 
 > This is **not** the Claude Code plugin (`.claude-plugin/`). These plugins
 > extend career-ops itself.

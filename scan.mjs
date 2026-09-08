@@ -48,7 +48,7 @@ import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
-import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack } from './competitor-watch.mjs';
+import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack, technicalOffersForAlert } from './competitor-watch.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -2611,7 +2611,9 @@ async function main() {
   }
   if (!dryRun && newWatchOffers.length > 0) {
     await appendWatchOffers(COMPETITOR_WATCH_PATH, newWatchOffers, date);
-    await notifySlack(newWatchOffers, date);
+    const technicalAlerts = technicalOffersForAlert(newWatchOffers);
+    if (technicalAlerts.length > 0) await notifySlack(technicalAlerts, date);
+    else console.log(`Competitor watch: ${newWatchOffers.length} new posting(s), no technical Slack alert.`);
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};
