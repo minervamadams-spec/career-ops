@@ -24,10 +24,11 @@ test('watch sink deduplicates independently and serializes required fields', asy
 
 test('Apify posted_at field maps an ISO posting date to the scanner timestamp', () => {
   const job = normalizeItem(
-    { title: 'Lead Critical Facility Engineer', url: 'https://example.test/jobs/1', companyName: 'BGIS', postedDate: '2026-08-29T00:00:00.000Z' },
-    { title: 'title', url: 'url', company: 'companyName', posted_at: 'postedDate' },
+    { title: 'Lead Critical Facility Engineer', url: 'https://example.test/jobs/1', companyName: 'BGIS', postedDate: '2026-08-29T00:00:00.000Z', description: '<p>Operate cloud infrastructure.</p>' },
+    { title: 'title', url: 'url', company: 'companyName', posted_at: 'postedDate', description: 'description' },
   );
   assert.equal(new Date(job.postedAt).toISOString().slice(0, 10), '2026-08-29');
+  assert.equal(job.description, 'Operate cloud infrastructure.');
 });
 
 test('Slack notifier groups companies, highlights technical roles, and safely no-ops', async () => {

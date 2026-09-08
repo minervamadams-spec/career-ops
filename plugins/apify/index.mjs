@@ -171,6 +171,7 @@ export function normalizeItem(item, fieldMap, defaults) {
     company: fieldMap.company ? String(pickField(item, fieldMap.company) || '') : '',
     location: fieldMap.location ? String(pickField(item, fieldMap.location) || '') : '',
     postedAt: fieldMap.posted_at ? normalizePostedAt(pickField(item, fieldMap.posted_at)) : undefined,
+    description: fieldMap.description ? htmlToText(pickField(item, fieldMap.description)) : '',
   };
   for (const [k, v] of Object.entries(defaults || {})) {
     if (!ALLOWED_DEFAULT_KEYS.has(k)) continue;

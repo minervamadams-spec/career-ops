@@ -2448,11 +2448,15 @@ async function main() {
           // Narrow, intentional bypass: watch postings are competitive
           // intelligence, never candidates. Keep the URL/security boundary and
           // isolated watch dedup, but skip every personal-fit filter below.
-          if (!isHttpsUrl(job.url)) {
+          // Apify caches full descriptions locally for ordinary candidate roles.
+          // A watch row must retain its original public link for its independent
+          // TSV and Slack alert, so prefer the plugin's validated remote URL.
+          const watchUrl = job._remote_url || job.url;
+          if (!isHttpsUrl(watchUrl)) {
             console.warn(`Competitor watch: skipped non-HTTPS URL from ${company.name}.`);
             continue;
           }
-          const dedupUrl = normalizeUrlForDedup(job.url);
+          const dedupUrl = normalizeUrlForDedup(watchUrl);
           if (seenWatchUrls.has(dedupUrl)) { totalDupes++; continue; }
           seenWatchUrls.add(dedupUrl);
           const classification = classifyTechnical(job, competitorWatch.keywords);
