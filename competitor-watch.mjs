@@ -7,13 +7,13 @@ export const DEFAULT_TECHNICAL_KEYWORDS = [
   'CTO', 'Chief Technology', 'VP Engineering', 'Head of Engineering', 'Engineering Manager',
   'Software Engineer', 'Software Developer', 'Programmer', 'Backend', 'Back-end', 'Server',
   'Full Stack', 'Frontend', 'Front-end', 'DevOps', 'SRE', 'Platform Engineer', 'Data Engineer',
-  'Data Scientist', 'Cloud', 'Infrastructure', 'IT', 'Systems Administrator', 'Systems Engineer',
+  'Data Scientist', 'Business Intelligence', 'Data Analytics', 'Data Center', 'Cloud', 'Infrastructure', 'IT', 'Systems Administrator', 'Systems Engineer',
   'Architect', 'QA Engineer', 'SDET', 'Security Engineer', 'Machine Learning', 'AI Engineer',
 ];
 
 const HEADER = 'url\tfirst_seen\tcompany\ttitle\tlocation\tposted_at\tclassification\tmatched_keywords\tsource\n';
 const clean = (value) => String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-const isStrongDescriptionTerm = (term) => /^(CTO|Chief Technology|VP Engineering|Head of Engineering|Engineering Manager|Software Engineer|Software Developer|Programmer|DevOps|SRE|Platform Engineer|Data Engineer|Data Scientist|Systems Administrator|Systems Engineer|QA Engineer|SDET|Security Engineer|Machine Learning|AI Engineer)$/i.test(term);
+const isStrongDescriptionTerm = (term) => /^(CTO|Chief Technology|VP Engineering|Head of Engineering|Engineering Manager|Software Engineer|Software Developer|Programmer|DevOps|SRE|Platform Engineer|Data Engineer|Data Scientist|Business Intelligence|Data Analytics|Data Center|Systems Administrator|Systems Engineer|QA Engineer|SDET|Security Engineer|Machine Learning|AI Engineer)$/i.test(term);
 
 export function isHttpsUrl(value) {
   try { return new URL(String(value)).protocol === 'https:'; } catch { return false; }

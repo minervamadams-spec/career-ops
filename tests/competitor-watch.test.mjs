@@ -9,6 +9,7 @@ import { normalizeItem } from '../plugins/apify/index.mjs';
 test('classifies technical title, description, non-technical, and unknown', () => {
   assert.deepEqual(classifyTechnical({ title: 'Senior .NET Backend Engineer' }).classification, 'technical');
   assert.deepEqual(classifyTechnical({ title: 'Facilities Manager' }).classification, 'non-technical');
+  assert.deepEqual(classifyTechnical({ title: 'Data Center Technician' }).classification, 'technical');
   assert.deepEqual(classifyTechnical({ title: '', description: 'Operate the cloud infrastructure.' }).classification, 'non-technical');
   assert.deepEqual(classifyTechnical({ title: '', description: 'The Software Engineer owns this system.' }).classification, 'technical');
   assert.deepEqual(classifyTechnical({}).classification, 'unknown');
