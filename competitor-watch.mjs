@@ -97,13 +97,8 @@ export function formatSlackMessage(offers, date) {
   }
   const lines = [`Competitor hiring watch — ${date}`];
   for (const [company, jobs] of byCompany) {
-    lines.push(`\n*${company}*`);
-    for (const job of jobs.filter(j => j.classification === 'technical')) {
-      lines.push(`⚠️ Technical hire: ${job.title} — ${job.url}${job.postedAt ? ` (posted ${job.postedAt})` : ''}`);
-    }
-    for (const job of jobs.filter(j => j.classification !== 'technical')) {
-      lines.push(`• ${job.title} — ${job.url}${job.postedAt ? ` (posted ${job.postedAt})` : ''}`);
-    }
+    lines.push(`\n*${company} — ⚠️ Technical hires*`);
+    for (const job of jobs) lines.push(`• <${job.url}|${job.title}>${job.postedAt ? ` — posted ${job.postedAt}` : ''}`);
   }
   return lines.join('\n');
 }
