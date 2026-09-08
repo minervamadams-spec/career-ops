@@ -48,7 +48,7 @@ import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
-import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack, technicalOffersForAlert } from './competitor-watch.mjs';
+import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack, reclassifyWatchHistory, technicalOffersForAlert } from './competitor-watch.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -2343,6 +2343,10 @@ async function main() {
   const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany);
   const seenUrls = dedupSnapshot.seen;
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
+  if (!dryRun && competitorWatch.enabled) {
+    const refreshedWatchRows = reclassifyWatchHistory(COMPETITOR_WATCH_PATH, competitorWatch.keywords);
+    if (refreshedWatchRows) console.log(`Competitor watch: refreshed ${refreshedWatchRows} prior classification(s).`);
+  }
   const seenWatchUrls = loadSeenWatchUrls(COMPETITOR_WATCH_PATH);
 
   // 5. Fetch from each target

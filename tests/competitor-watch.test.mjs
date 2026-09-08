@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { classifyTechnical, appendWatchOffers, loadSeenWatchUrls, formatSlackMessage, notifySlack, technicalOffersForAlert } from '../competitor-watch.mjs';
+import { classifyTechnical, appendWatchOffers, loadSeenWatchUrls, formatSlackMessage, notifySlack, reclassifyWatchHistory, technicalOffersForAlert } from '../competitor-watch.mjs';
 import { normalizeItem } from '../plugins/apify/index.mjs';
 
 test('classifies technical title, description, non-technical, and unknown', () => {
   assert.deepEqual(classifyTechnical({ title: 'Senior .NET Backend Engineer' }).classification, 'technical');
   assert.deepEqual(classifyTechnical({ title: 'Facilities Manager' }).classification, 'non-technical');
-  assert.deepEqual(classifyTechnical({ title: '', description: 'Operate the cloud infrastructure.' }).classification, 'technical');
+  assert.deepEqual(classifyTechnical({ title: '', description: 'Operate the cloud infrastructure.' }).classification, 'non-technical');
+  assert.deepEqual(classifyTechnical({ title: '', description: 'The Software Engineer owns this system.' }).classification, 'technical');
   assert.deepEqual(classifyTechnical({}).classification, 'unknown');
   assert.equal(classifyTechnical({ title: 'Platform Lead' }, ['Platform Lead']).classification, 'technical');
 });
@@ -20,6 +21,11 @@ test('watch sink deduplicates independently and serializes required fields', asy
   await appendWatchOffers(file, [offer], '2026-09-08');
   assert(loadSeenWatchUrls(file).has(offer.url));
   assert.match(readFileSync(file, 'utf8'), /technical\tBackend\tapify-api/);
+  const stale = `${offer.url}\t2026-09-08\tBGIS\tFacilities Manager\tUS\t\ttechnical\tIT\tapify-api\n`;
+  await appendWatchOffers(file, [], '2026-09-08');
+  const { appendFileSync } = await import('fs'); appendFileSync(file, stale);
+  assert.equal(reclassifyWatchHistory(file), 1);
+  assert.match(readFileSync(file, 'utf8'), /Facilities Manager\tUS\t\tnon-technical\t\tapify-api/);
 });
 
 test('Apify posted_at field maps an ISO posting date to the scanner timestamp', () => {

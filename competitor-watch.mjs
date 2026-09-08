@@ -13,6 +13,7 @@ export const DEFAULT_TECHNICAL_KEYWORDS = [
 
 const HEADER = 'url\tfirst_seen\tcompany\ttitle\tlocation\tposted_at\tclassification\tmatched_keywords\tsource\n';
 const clean = (value) => String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+const isStrongDescriptionTerm = (term) => /^(CTO|Chief Technology|VP Engineering|Head of Engineering|Engineering Manager|Software Engineer|Software Developer|Programmer|DevOps|SRE|Platform Engineer|Data Engineer|Data Scientist|Systems Administrator|Systems Engineer|QA Engineer|SDET|Security Engineer|Machine Learning|AI Engineer)$/i.test(term);
 
 export function isHttpsUrl(value) {
   try { return new URL(String(value)).protocol === 'https:'; } catch { return false; }
@@ -37,7 +38,10 @@ export function classifyTechnical({ title, description } = {}, keywords = DEFAUL
     return value.toLocaleLowerCase().includes(term.toLocaleLowerCase());
   });
   const titleMatches = find(title);
-  const descriptionMatches = titleMatches.length ? [] : find(description);
+  // Job descriptions commonly mention generic IT, cloud, infrastructure, and
+  // architects for unrelated roles. They cannot by themselves make a role
+  // technical unless they name a specific technical job family.
+  const descriptionMatches = titleMatches.length ? [] : find(description).filter(isStrongDescriptionTerm);
   const matchedKeywords = [...new Set([...titleMatches, ...descriptionMatches])];
   if (matchedKeywords.length) return { classification: 'technical', matchedKeywords };
   if (clean(title) || clean(description)) return { classification: 'non-technical', matchedKeywords: [] };
@@ -47,6 +51,26 @@ export function classifyTechnical({ title, description } = {}, keywords = DEFAUL
 export function loadSeenWatchUrls(filePath) {
   if (!existsSync(filePath)) return new Set();
   return new Set(readFileSync(filePath, 'utf8').split('\n').slice(1).map(line => line.split('\t')[0]).filter(Boolean));
+}
+
+/** Refresh prior watch classifications after classifier improvements. */
+export function reclassifyWatchHistory(filePath, keywords = DEFAULT_TECHNICAL_KEYWORDS) {
+  if (!existsSync(filePath)) return 0;
+  const lines = readFileSync(filePath, 'utf8').split('\n');
+  let changed = 0;
+  const refreshed = lines.map((line, index) => {
+    if (!line || index === 0) return line;
+    const fields = line.split('\t');
+    const result = classifyTechnical({ title: fields[3] }, keywords);
+    const matched = result.matchedKeywords.join(', ');
+    if (fields[6] === result.classification && fields[7] === matched) return line;
+    fields[6] = result.classification;
+    fields[7] = matched;
+    changed++;
+    return fields.join('\t');
+  });
+  if (changed) writeFileSync(filePath, refreshed.join('\n'), 'utf8');
+  return changed;
 }
 
 export function formatWatchRow(offer, date) {
