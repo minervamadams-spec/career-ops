@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { classifyTechnical, appendWatchOffers, loadSeenWatchUrls, formatSlackMessage, notifySlack } from '../competitor-watch.mjs';
+import { normalizeItem } from '../plugins/apify/index.mjs';
 
 test('classifies technical title, description, non-technical, and unknown', () => {
   assert.deepEqual(classifyTechnical({ title: 'Senior .NET Backend Engineer' }).classification, 'technical');
@@ -19,6 +20,14 @@ test('watch sink deduplicates independently and serializes required fields', asy
   await appendWatchOffers(file, [offer], '2026-09-08');
   assert(loadSeenWatchUrls(file).has(offer.url));
   assert.match(readFileSync(file, 'utf8'), /technical\tBackend\tapify-api/);
+});
+
+test('Apify posted_at field maps an ISO posting date to the scanner timestamp', () => {
+  const job = normalizeItem(
+    { title: 'Lead Critical Facility Engineer', url: 'https://example.test/jobs/1', companyName: 'BGIS', postedDate: '2026-08-29T00:00:00.000Z' },
+    { title: 'title', url: 'url', company: 'companyName', posted_at: 'postedDate' },
+  );
+  assert.equal(new Date(job.postedAt).toISOString().slice(0, 10), '2026-08-29');
 });
 
 test('Slack notifier groups companies, highlights technical roles, and safely no-ops', async () => {

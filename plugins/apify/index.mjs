@@ -57,6 +57,15 @@ function pickField(item, spec) {
 
 const ALLOWED_DEFAULT_KEYS = new Set(['title', 'url', 'company', 'location']);
 
+function normalizePostedAt(value) {
+  if (value == null || value === '') return undefined;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  const ms = Number.isFinite(numeric) && numeric > 0
+    ? (numeric < 10_000_000_000 ? numeric * 1000 : numeric)
+    : Date.parse(String(value));
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
 // Actors return URLs from arbitrary external sites — treat them as untrusted.
 // Reject anything that isn't https so javascript:/data:/file:/http: URLs can't
 // end up clickable in pipeline.md or in the JD-cache filename hash.
@@ -161,6 +170,7 @@ export function normalizeItem(item, fieldMap, defaults) {
     url: String(pickField(item, fieldMap.url) || ''),
     company: fieldMap.company ? String(pickField(item, fieldMap.company) || '') : '',
     location: fieldMap.location ? String(pickField(item, fieldMap.location) || '') : '',
+    postedAt: fieldMap.posted_at ? normalizePostedAt(pickField(item, fieldMap.posted_at)) : undefined,
   };
   for (const [k, v] of Object.entries(defaults || {})) {
     if (!ALLOWED_DEFAULT_KEYS.has(k)) continue;
@@ -190,11 +200,12 @@ export default {
         !isFieldSpec(entry.field_map.url) ||
         (entry.field_map.company != null && !isFieldSpec(entry.field_map.company)) ||
         (entry.field_map.location != null && !isFieldSpec(entry.field_map.location)) ||
+        (entry.field_map.posted_at != null && !isFieldSpec(entry.field_map.posted_at)) ||
         (entry.field_map.description != null && !isFieldSpec(entry.field_map.description))
       ) {
         throw new Error(
           `apify: entry ${entry.name} has invalid field_map. Each of title, url, company, ` +
-          `location, description must be a string or a non-empty array of strings. title and url are required.`
+          `location, posted_at, description must be a string or a non-empty array of strings. title and url are required.`
         );
       }
 
