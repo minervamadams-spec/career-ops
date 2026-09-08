@@ -48,6 +48,7 @@ import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
+import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack } from './competitor-watch.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -72,6 +73,9 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
 // lane A is silently counted as a duplicate in lane B and never shown at all.
 const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || 'data/scan-history.tsv';
 const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || 'data/pipeline.md';
+// Separate by design: competitor intelligence must never share pipeline state
+// or personal-search deduplication.
+const COMPETITOR_WATCH_PATH = process.env.COMPETITOR_WATCH_PATH || 'data/competitor-watch.tsv';
 const APPLICATIONS_PATH = 'data/applications.md';
 const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
 
@@ -2237,6 +2241,7 @@ async function main() {
   const config = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
   const companies = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
   const boards = Array.isArray(config.job_boards) ? config.job_boards : [];
+  const competitorWatch = normalizeWatchConfig(config.competitor_watch);
   const titleFilter = buildTitleFilter(config.title_filter);
 
   // Seniority tier classifier integration
@@ -2312,6 +2317,12 @@ async function main() {
 
   resolveEntries(companies);
   resolveEntries(boards, { isBoard: true });
+  // Watch entries use the identical provider boundary but are marked before
+  // fetching so the per-job branch below cannot accidentally enter the
+  // personal-fit pipeline.
+  if (competitorWatch.enabled) {
+    resolveEntries(competitorWatch.companies.map(entry => ({ ...entry, watch: true })));
+  }
 
   const localParserCount = targets.filter(t => t._provider.id === 'local-parser').length;
   const companyCount = targets.length - boardCount;
@@ -2332,6 +2343,7 @@ async function main() {
   const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany);
   const seenUrls = dedupSnapshot.seen;
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
+  const seenWatchUrls = loadSeenWatchUrls(COMPETITOR_WATCH_PATH);
 
   // 5. Fetch from each target
   const date = new Date().toISOString().slice(0, 10);
@@ -2353,6 +2365,7 @@ async function main() {
   let totalFilteredVisa = 0;
   let totalDupes = 0;
   const newOffers = [];
+  const newWatchOffers = [];
   const errors = [...resolveErrors];
   const emptyTargets = [];
 
@@ -2430,6 +2443,31 @@ async function main() {
         job.trustScore = trustResult.score;
         job.trustFlags = trustResult.flags;
         job.trustLevel = trustResult.level;
+
+        if (company.watch) {
+          // Narrow, intentional bypass: watch postings are competitive
+          // intelligence, never candidates. Keep the URL/security boundary and
+          // isolated watch dedup, but skip every personal-fit filter below.
+          if (!isHttpsUrl(job.url)) {
+            console.warn(`Competitor watch: skipped non-HTTPS URL from ${company.name}.`);
+            continue;
+          }
+          const dedupUrl = normalizeUrlForDedup(job.url);
+          if (seenWatchUrls.has(dedupUrl)) { totalDupes++; continue; }
+          seenWatchUrls.add(dedupUrl);
+          const classification = classifyTechnical(job, competitorWatch.keywords);
+          const postedAt = postedAtIsoDate(job.postedAt);
+          newWatchOffers.push({
+            ...job,
+            url: dedupUrl,
+            company: job.company || company.name,
+            source: sourceName,
+            postedAt,
+            classification: classification.classification,
+            matchedKeywords: classification.matchedKeywords,
+          });
+          continue;
+        }
 
         // Company blacklist (#1742) — the user's own do-not-apply decision,
         // checked first: it's company-level, not a per-posting signal. Never
@@ -2571,6 +2609,10 @@ async function main() {
     await appendToPipeline(verifiedOffers);
     await appendToScanHistory(verifiedOffers, date);
   }
+  if (!dryRun && newWatchOffers.length > 0) {
+    await appendWatchOffers(COMPETITOR_WATCH_PATH, newWatchOffers, date);
+    await notifySlack(newWatchOffers, date);
+  }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};
     for (const item of cooldownOffers) {
@@ -2682,6 +2724,7 @@ async function main() {
     console.log(`Invalid (guarded):     ${invalidOffers.length} dropped`);
   }
   console.log(`New offers added:      ${verifiedOffers.length}`);
+  if (competitorWatch.enabled) console.log(`New competitor postings: ${newWatchOffers.length}`);
 
   // Trust validation summary (only when trust_filter is configured)
   if (config.trust_filter && config.trust_filter.enabled !== false && verifiedOffers.length > 0) {

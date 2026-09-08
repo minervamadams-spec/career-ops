@@ -188,6 +188,7 @@ const SYSTEM_PATHS = [
   'pipeline-lock.mjs',
   'portal-health-lock.mjs',
   'classify-tier.mjs',
+  'competitor-watch.mjs',
   'scan-ats-full.mjs',
   'scan-interamt.mjs',
   'company-funded.mjs',

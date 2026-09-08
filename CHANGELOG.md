@@ -1,5 +1,9 @@
 # Changelog
 
+### Features
+
+* **scan:** add opt-in isolated competitor hiring watch with deterministic technical-role alerts
+
 ## [1.26.0](https://github.com/santifer/career-ops/compare/career-ops-v1.25.0...career-ops-v1.26.0) (2026-08-10)
 
 

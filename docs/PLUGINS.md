@@ -5,6 +5,17 @@ external service — things the zero-keys, local-first core doesn't carry. They 
 **opt-in**, sandboxed-by-convention, and additive: with no plugins enabled, the
 core runs exactly as it always has.
 
+## Competitor hiring watch
+
+`portals.yml` can contain an opt-in `competitor_watch` block. Its companies use
+the same approved providers (including the keyed Apify plugin) but their results
+go only to `data/competitor-watch.tsv`: they are never written to the personal
+pipeline or scan history, scored, ranked, or sent through application flows.
+Technical-role classification is deterministic and uses the editable
+`technical_keywords` list. Set `COMPETITOR_WATCH_SLACK_WEBHOOK_URL` in `.env`
+to send a new-postings-only Slack incoming-webhook alert; without it, scans log
+one skip message and otherwise complete normally.
+
 > This is **not** the Claude Code plugin (`.claude-plugin/`). These plugins
 > extend career-ops itself.
 
