@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { classifyTechnical, appendWatchOffers, loadSeenWatchUrls, formatSlackMessage, notifySlack, reclassifyWatchHistory, technicalOffersForAlert } from '../competitor-watch.mjs';
+import { classifyTechnical, appendWatchOffers, loadSeenWatchUrls, formatSlackMessage, notifySlack, notifySlackNoUpdates, reclassifyWatchHistory, technicalOffersForAlert } from '../competitor-watch.mjs';
 import { normalizeItem } from '../plugins/apify/index.mjs';
 
 test('classifies technical title, description, non-technical, and unknown', () => {
@@ -45,4 +45,6 @@ test('Slack notifier groups companies, highlights technical roles, and safely no
   const logs = []; assert.equal((await notifySlack(offers, '2026-09-08', { log: s => logs.push(s) })).reason, 'no-webhook');
   let payload; const result = await notifySlack(offers, '2026-09-08', { webhookUrl: 'https://hooks.slack.test/x', fetchImpl: async (_u, init) => { payload = JSON.parse(init.body); return { ok: true }; }, log() {} });
   assert.equal(result.sent, true); assert.match(payload.text, /Backend Engineer/);
+  const heartbeat = await notifySlackNoUpdates('2026-09-08', { webhookUrl: 'https://hooks.slack.test/x', fetchImpl: async (_u, init) => { payload = JSON.parse(init.body); return { ok: true }; }, log() {} });
+  assert.equal(heartbeat.sent, true); assert.match(payload.text, /No new technical BGIS or Veritas roles today/);
 });

@@ -48,7 +48,7 @@ import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
-import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack, reclassifyWatchHistory, technicalOffersForAlert } from './competitor-watch.mjs';
+import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack, notifySlackNoUpdates, reclassifyWatchHistory, technicalOffersForAlert } from './competitor-watch.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -2617,11 +2617,12 @@ async function main() {
     await appendToPipeline(verifiedOffers);
     await appendToScanHistory(verifiedOffers, date);
   }
-  if (!dryRun && newWatchOffers.length > 0) {
-    await appendWatchOffers(COMPETITOR_WATCH_PATH, newWatchOffers, date);
+  if (!dryRun && competitorWatch.enabled) {
+    if (newWatchOffers.length > 0) await appendWatchOffers(COMPETITOR_WATCH_PATH, newWatchOffers, date);
     const technicalAlerts = technicalOffersForAlert(newWatchOffers);
     if (technicalAlerts.length > 0) await notifySlack(technicalAlerts, date);
-    else console.log(`Competitor watch: ${newWatchOffers.length} new posting(s), no technical Slack alert.`);
+    else if (process.env.COMPETITOR_WATCH_DAILY_STATUS === 'true') await notifySlackNoUpdates(date);
+    else if (newWatchOffers.length > 0) console.log(`Competitor watch: ${newWatchOffers.length} new posting(s), no technical Slack alert.`);
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};

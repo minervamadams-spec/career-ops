@@ -108,6 +108,21 @@ export function technicalOffersForAlert(offers) {
   return offers.filter(offer => offer.classification === 'technical');
 }
 
+/** Daily heartbeat, used only by the launchd scheduler when no technical role is new. */
+export async function notifySlackNoUpdates(date, { webhookUrl = process.env.COMPETITOR_WATCH_SLACK_WEBHOOK_URL, fetchImpl = globalThis.fetch, log = console.log } = {}) {
+  if (!webhookUrl) { log('Competitor watch: Slack skipped — COMPETITOR_WATCH_SLACK_WEBHOOK_URL is not set.'); return { sent: false, reason: 'no-webhook' }; }
+  const text = `Competitor hiring watch — ${date}\nNo new technical BGIS or Veritas roles today.`;
+  try {
+    const response = await fetchImpl(webhookUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    log('Competitor watch: Slack no-updates heartbeat sent.');
+    return { sent: true, text };
+  } catch (err) {
+    console.warn(`Competitor watch: Slack heartbeat failed (${err.message}); scan still completed.`);
+    return { sent: false, reason: 'network-error', text };
+  }
+}
+
 export async function notifySlack(offers, date, { webhookUrl = process.env.COMPETITOR_WATCH_SLACK_WEBHOOK_URL, fetchImpl = globalThis.fetch, log = console.log } = {}) {
   if (!offers.length) return { sent: false, reason: 'no-new-postings' };
   if (!webhookUrl) { log('Competitor watch: Slack skipped — COMPETITOR_WATCH_SLACK_WEBHOOK_URL is not set.'); return { sent: false, reason: 'no-webhook' }; }

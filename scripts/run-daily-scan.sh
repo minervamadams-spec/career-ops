@@ -121,6 +121,10 @@ resolve_model() {
 # MCP discovery run.
 TASK="Execute the following scheduled task now. This is a real, active task — begin immediately with Step 0, work through as many tiers as your budget allows per the HARD RULE section, and do not stop to ask for confirmation or wait for further input."
 
+# Only the scheduled run sends the one-line no-updates heartbeat to #job-alert.
+# Manual scans remain alert-only so testing never adds channel noise.
+export COMPETITOR_WATCH_DAILY_STATUS=true
+
 # caffeinate -i prevents idle system sleep for the duration of the wrapped
 # command and releases automatically when it exits. Needed because this runs
 # as a genuinely unattended launchd job: the 2026-08-15 06:00 run fired on
