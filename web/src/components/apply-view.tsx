@@ -232,7 +232,7 @@ export function ApplyView() {
                 ) : (
                   <p className="mt-2 text-xs text-muted">
                     This wasn&apos;t opened from an evaluated report, so there&apos;s no tracker row to update — once you submit, add it
-                    from the <a href="/pipeline" className="text-brand hover:underline">Pipeline</a> if you want it tracked.
+                    from <a href="/" className="text-brand hover:underline">Today</a> if you want it tracked.
                   </p>
                 )}
               </div>

@@ -1,0 +1,44 @@
+# templates/skip-reasons.yml — SINGLE SOURCE OF TRUTH for the structured
+# self-filter reason taxonomy captured when a tracker row is set to SKIP.
+#
+# Read live by both the CLI (set-status.mjs) and the web app
+# (web/src/lib/core/skip-reasons.ts), mirroring templates/states.yml's own
+# pattern so the two writers can never drift. Mined from 130 hand-typed
+# "Passed: <reason>" notes across data/applications.md (career-ops offerly
+# scoring brief, 2026-09-22) — these 11 categories covered all but a handful
+# of single-occurrence outliers, which fall to skill_or_background_mismatch.
+#
+# `id` is what gets written into the Notes cell as a `reason={id}` prefix
+# (see AGENTS.md's `track=`/`applying=yes` Notes-prefix convention — same
+# mechanism, no tracker schema migration). `label` is the human-facing text.
+reasons:
+  - id: not_my_domain
+    label: "Not my domain"
+  - id: location_or_remote_restricted
+    label: "Location/remote restricted"
+  - id: outside_commute_radius
+    # Distinct from location_or_remote_restricted: this is specifically "the
+    # onsite/hybrid location is further than I'll commute", not "remote isn't
+    # offered" or "the JD excludes my state". Added 2026-09-22 after Trenton/
+    # Cedar Knolls, NJ postings surfaced despite being outside the 15mi
+    # max_commute_miles radius — see web/src/lib/commute-distance.mjs's PLACES
+    # table, which only auto-filters towns it has coordinates for.
+    label: "Outside commute radius"
+  - id: expired_listing
+    label: "Expired listing"
+  - id: unwanted_part_time_or_fractional
+    label: "Unwanted part-time/fractional"
+  - id: duplicate_of_existing
+    label: "Duplicate of existing application"
+  - id: not_qualified
+    label: "Not qualified"
+  - id: travel_required
+    label: "Travel required"
+  - id: comp_too_low
+    label: "Comp too low"
+  - id: wrong_seniority
+    label: "Wrong seniority"
+  - id: undesired_shift_or_schedule
+    label: "Undesired shift/schedule"
+  - id: skill_or_background_mismatch
+    label: "Skill/background mismatch"
