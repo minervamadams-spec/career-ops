@@ -85,6 +85,20 @@ location:
   needs_sponsorship: false
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
+  # ZIP + a hard commute-radius cutoff for the web app's "Fresh matches"
+  # feed (web/src/app/api/whats-new/route.ts) — a non-remote posting further
+  # than max_commute_miles from zip is excluded. Both optional; omit either
+  # to disable the cutoff entirely (nothing gets excluded on commute alone).
+  # zip: "94103"
+  # max_commute_miles: 15
+  # Towns YOU already consider local, exempt from the computed-mileage cutoff
+  # regardless of what the distance estimate says (a straight-line-distance-
+  # plus-road-factor estimate can land a town you know is a reasonable
+  # commute a mile or two over the numeric max). Optional; omit for no
+  # exemptions beyond what the distance estimate itself allows.
+  # local_towns:
+  #   - "Oakland"
+  #   - "Berkeley"
 
 language:
   # Human-facing output language for reports, tracker notes, PDFs, cover

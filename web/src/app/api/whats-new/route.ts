@@ -30,7 +30,8 @@ export async function GET(req: Request) {
   const dismissed = readDismissedLeadUrls();
   const locationExcluded = readLocationExcludedCompanies();
   const inboxByUrl = new Map(readInbox().map((job) => [job.url, job]));
-  const { commuteZip, maxCommuteMiles } = readProfileConfig();
+  const { commuteZip, maxCommuteMiles, localGovExemptKeywords, localTowns } = readProfileConfig();
+  const normLocalTowns = localTowns.map((t) => t.toLowerCase());
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
@@ -49,9 +50,23 @@ export async function GET(req: Request) {
     const commuteMiles = recordedMiles ?? estimatedMiles ?? undefined;
     // A hard local-radius cutoff: only applies to a concrete on-site/hybrid
     // workplace with a known distance — remote roles and roles with no
-    // resolvable location are never excluded on commute alone.
+    // resolvable location are never excluded on commute alone. Two
+    // exemptions, both from Minerva 2026-09-22:
+    //   1. Local government/judiciary postings (same keyword list scan.mjs's
+    //      hard-filter gate uses for the salary-minimum/large-company
+    //      exemption) — "if Morristown is outside of that, that is the one I
+    //      want to keep if openings are at the courthouse".
+    //   2. A town on her own explicit local_towns list (config/profile.yml) —
+    //      authoritative regardless of computed mileage, since the estimate
+    //      (great-circle distance × a road-factor fudge) can land a town she
+    //      already judged local a mile or two over the numeric max (Denville
+    //      computes to 16mi with real coordinates).
     const arrangement = workArrangementFromLocation(location || "");
-    if (maxCommuteMiles != null && arrangement !== "Remote" && typeof commuteMiles === "number" && commuteMiles > maxCommuteMiles) return null;
+    const exemptText = `${company || ""} ${title || ""} ${location || ""}`.toLowerCase();
+    const isLocalGovExempt = localGovExemptKeywords.some((k) => exemptText.includes(k.toLowerCase()));
+    const locationLower = (location || "").toLowerCase();
+    const isLocalTownExempt = normLocalTowns.some((t) => locationLower.includes(t));
+    if (maxCommuteMiles != null && !isLocalGovExempt && !isLocalTownExempt && arrangement !== "Remote" && typeof commuteMiles === "number" && commuteMiles > maxCommuteMiles) return null;
     return {
       url,
       company: (company || "").trim(),

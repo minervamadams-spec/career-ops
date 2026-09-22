@@ -49,9 +49,25 @@ export type ProfileConfig = {
   /** `location.max_commute_miles` — the user's hard cutoff for a non-remote
    *  commute. null when unset (no cutoff enforced). */
   maxCommuteMiles: number | null;
+  /** `hard_filters.local_government_exempt_keywords` from config/profile.yml
+   *  — the same list scan.mjs's hard-filter gate uses to exempt local
+   *  government/judiciary postings from the salary-minimum and large-company
+   *  gates. Reused here to exempt them from the commute-radius cutoff too
+   *  (Minerva, 2026-09-22: "if Morristown is outside of that, that is the
+   *  one I want to keep if openings are at the courthouse" — one instance of
+   *  the same standing policy, not a one-off carve-out). Empty array when
+   *  unset (no exemption applied). */
+  localGovExemptKeywords: string[];
+  /** `location.local_towns` — the user's own explicit "this counts as local"
+   *  list (structured from what was previously prose-only commute_note).
+   *  Authoritative: exempt from the computed-mileage cutoff entirely, since a
+   *  town the user has already judged local shouldn't get silently excluded
+   *  by a great-circle-distance-plus-fudge-factor estimate landing a mile or
+   *  two over the numeric max. Empty array when unset. */
+  localTowns: string[];
 };
 
-const PROFILE_DEFAULTS: ProfileConfig = { tracks: {}, weeklyTargets: null, country: null, commuteZip: null, maxCommuteMiles: null };
+const PROFILE_DEFAULTS: ProfileConfig = { tracks: {}, weeklyTargets: null, country: null, commuteZip: null, maxCommuteMiles: null, localGovExemptKeywords: [], localTowns: [] };
 
 /**
  * Reads the `tracks:`, `weekly_targets:`, and `location.country` fields from
@@ -75,11 +91,18 @@ export function readProfileConfig(): ProfileConfig {
       wt && typeof wt.jobs_added_per_week === "number" && typeof wt.applying_days_per_week === "number"
         ? { jobsAddedPerWeek: wt.jobs_added_per_week, applyingDaysPerWeek: wt.applying_days_per_week }
         : null;
-    const loc = doc?.location as { country?: string; zip?: string | number; max_commute_miles?: number } | undefined;
+    const loc = doc?.location as { country?: string; zip?: string | number; max_commute_miles?: number; local_towns?: unknown } | undefined;
     const country = typeof loc?.country === "string" && loc.country.trim() ? loc.country.trim() : null;
     const commuteZip = loc?.zip != null && String(loc.zip).trim() ? String(loc.zip).trim() : null;
     const maxCommuteMiles = typeof loc?.max_commute_miles === "number" && Number.isFinite(loc.max_commute_miles) ? loc.max_commute_miles : null;
-    return { tracks, weeklyTargets, country, commuteZip, maxCommuteMiles };
+    const localTowns = Array.isArray(loc?.local_towns)
+      ? loc.local_towns.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+      : [];
+    const hardFilters = doc?.hard_filters as { local_government_exempt_keywords?: unknown } | undefined;
+    const localGovExemptKeywords = Array.isArray(hardFilters?.local_government_exempt_keywords)
+      ? hardFilters.local_government_exempt_keywords.filter((k): k is string => typeof k === "string" && k.trim().length > 0)
+      : [];
+    return { tracks, weeklyTargets, country, commuteZip, maxCommuteMiles, localGovExemptKeywords, localTowns };
   } catch {
     return PROFILE_DEFAULTS;
   }
