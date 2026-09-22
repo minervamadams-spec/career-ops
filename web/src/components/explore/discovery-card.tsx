@@ -152,7 +152,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN, source = "explore
       <div className="mt-0.5 space-y-2">
         {evaluatedN || doneEval ? (
           <a
-            href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
+            href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/"}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-2 text-xs font-medium text-brand max-sm:min-h-[44px]"
           >
             <Check className="size-3.5" /> Evaluated · view report

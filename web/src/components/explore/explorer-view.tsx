@@ -344,11 +344,11 @@ function FailedCard({ msg, onRetry }: { msg: string; onRetry: () => void }) {
         <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>Discovery needs the full toolkit</h2>
         <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
           Your Offerly home looks data-only or is on an older version. The free scanner ships with a complete checkout —
-          update your checkout, or paste a job URL on the pipeline to evaluate it directly.
+          update your checkout, or add a job URL from Today to evaluate it directly.
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Link href="/pipeline" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
-            Open pipeline
+          <Link href="/" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
+            Back to Today
           </Link>
           <Link href="/config" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand">
             Open Config

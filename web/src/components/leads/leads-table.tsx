@@ -71,9 +71,9 @@ export function LeadsTable({ top, rest, threshold }: { top: Row[]; rest: Row[]; 
   if (top.length === 0 && rest.length === 0) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center text-sm text-muted">
-        No scored roles yet. Evaluate a prospect from your{" "}
-        <Link href="/pipeline" className="text-brand hover:underline">
-          Pipeline
+        No scored roles yet. Evaluate a prospect from{" "}
+        <Link href="/explore" className="text-brand hover:underline">
+          Explore
         </Link>{" "}
         to see it ranked here.
       </div>

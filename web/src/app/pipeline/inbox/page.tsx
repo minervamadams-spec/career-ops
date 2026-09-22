@@ -9,14 +9,14 @@ export default async function InboxProspectPage({ searchParams }: { searchParams
   const raw = (await searchParams).url;
   const url = Array.isArray(raw) ? raw[0] : raw;
   const job = url ? readInbox().find((candidate) => candidate.url === url) ?? null : null;
-  if (!job) return <div className="mx-auto max-w-3xl px-6 py-10"><Link href="/pipeline" className="text-sm text-brand">← Back to Pipeline</Link><p className="mt-8 text-muted">This prospect is no longer in the inbox.</p></div>;
+  if (!job) return <div className="mx-auto max-w-3xl px-6 py-10"><Link href="/" className="text-sm text-brand">← Back to Today</Link><p className="mt-8 text-muted">This prospect is no longer in the inbox.</p></div>;
   const intake = readInboxIntake(job);
   const email = intake?.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)?.[0];
   const notes = intake?.replace(/^#.*$/gm, "").replace(/^Added:.*$/gm, "").replace(/^Platform:.*$/gm, "").replace(/^Work arrangement:.*$/gm, "").replace(/^Salary:.*$/gm, "").replace(/^## Notes\s*/m, "").trim();
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-9 max-sm:pb-24">
-      <Link href="/pipeline" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-brand"><ArrowLeft className="size-4" /> Pipeline</Link>
+      <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-brand"><ArrowLeft className="size-4" /> Today</Link>
       <main className="mt-5 rounded-2xl border border-border bg-surface/40 p-6">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">Inbox prospect</p>
         <h1 className="mt-2 font-display text-3xl text-landing">{job.role}</h1>

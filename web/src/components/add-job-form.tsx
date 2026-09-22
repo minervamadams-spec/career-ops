@@ -67,7 +67,7 @@ export function AddJobForm() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "failed to add");
       setDone(true);
-      setTimeout(() => router.push("/pipeline"), 900);
+      setTimeout(() => router.push("/"), 900);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to add");
     } finally {

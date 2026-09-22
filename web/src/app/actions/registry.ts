@@ -17,11 +17,6 @@ export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 // Canonical states (templates/states.yml) — the web validates against the same set.
 const CANON_STATUS = ["Evaluated", "Applied", "Responded", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP"];
 
-const TAB_VALUES = [
-  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP",
-] as const;
-const SORT_VALUES = ["company", "role", "score", "status", "date"] as const;
-
 export type StartJobInput = {
   title: string;
   subtitle?: string;
@@ -114,25 +109,6 @@ const ACTIONS: Record<string, ActionDef> = {
       const path = raw.path;
       if (!isStr(path) || !isAllowedPath(path)) return { status: "ignored", note: "blocked navigation" };
       ctx.push(path);
-      return { status: "done" };
-    },
-  },
-
-  filterPipeline: {
-    sideEffect: "none",
-    run: (raw, ctx) => {
-      const sp = new URLSearchParams();
-      const tab = typeof raw.tab === "string" ? raw.tab.toUpperCase() : "";
-      if ((TAB_VALUES as readonly string[]).includes(tab)) sp.set("tab", tab);
-      const min = typeof raw.min === "number" ? raw.min : parseFloat(String(raw.min ?? ""));
-      if (Number.isFinite(min) && min >= 0 && min <= 5) sp.set("min", String(min));
-      if (isStr(raw.q)) sp.set("q", String(raw.q).slice(0, 80));
-      const sort = typeof raw.sort === "string" ? raw.sort : "";
-      if ((SORT_VALUES as readonly string[]).includes(sort)) sp.set("sort", sort);
-      const dir = Number(raw.dir);
-      if (dir === 1 || dir === -1) sp.set("dir", String(dir));
-      const qs = sp.toString();
-      ctx.replace(`/pipeline${qs ? `?${qs}` : ""}`);
       return { status: "done" };
     },
   },

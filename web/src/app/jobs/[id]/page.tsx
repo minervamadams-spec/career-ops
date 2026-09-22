@@ -17,8 +17,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
   if (!job) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-10">
-        <Link href="/pipeline" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
-          <ArrowLeft className="size-4" /> Pipeline
+        <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
+          <ArrowLeft className="size-4" /> Today
         </Link>
         <p className="mt-8 text-sm text-muted">
           This worker is no longer in memory (it finished earlier or the page was reloaded).
@@ -29,8 +29,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
-      <Link href="/pipeline" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
-        <ArrowLeft className="size-4" /> Pipeline
+      <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand">
+        <ArrowLeft className="size-4" /> Today
       </Link>
 
       <section className="dot-bg relative mt-5 overflow-hidden rounded-2xl border border-border bg-surface/40 px-6 py-7">
@@ -55,17 +55,17 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           )}
           {job.status === "done" && job.kind === "evaluate" && (
             <div className="mt-5 rounded-xl border border-brand/25 bg-brand-soft/50 p-4">
-              <p className="text-sm font-medium text-foreground">Your evaluation is in Pipeline</p>
+              <p className="text-sm font-medium text-foreground">Your evaluation is ready</p>
               <p className="mt-1 text-xs leading-5 text-muted">
-                Pipeline is Offerly&apos;s application tracker. It contains the score, decision brief, strongest matches, gaps, compensation, risks, and full evidence.
+                The full report has the score, decision brief, strongest matches, gaps, compensation, risks, and evidence.
               </p>
               {job.reportId ? (
                 <Link href={`/pipeline/${job.reportId}`} className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground">
                   <FileText className="size-4" /> View evaluation <ArrowRight className="size-4" />
                 </Link>
               ) : (
-                <Link href="/pipeline" className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground">
-                  Open Pipeline <ArrowRight className="size-4" />
+                <Link href="/" className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground">
+                  Back to Today <ArrowRight className="size-4" />
                 </Link>
               )}
             </div>

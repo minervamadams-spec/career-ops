@@ -52,7 +52,7 @@ export function DeleteFromTracker({ n }: { n: string }) {
         return;
       }
       // Row is gone — leave the (now-orphaned) report page for the pipeline.
-      router.push("/pipeline");
+      router.push("/");
       router.refresh();
     } catch {
       setErr("Delete failed.");
