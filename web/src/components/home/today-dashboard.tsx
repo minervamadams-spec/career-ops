@@ -13,7 +13,6 @@ import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { useExplore } from "@/components/explore/explore-provider";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
-import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
@@ -75,11 +74,12 @@ export function TodayDashboard({
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
 
-  // Awaiting decision: scored (Evaluated) but no terminal status yet.
-  const awaiting = useMemo(
-    () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
-    [applications],
-  );
+  // Scored-but-undecided roles moved to /leads (Top Leads) — the same data,
+  // ranked by score with resume drafting as the primary action, instead of
+  // duplicated here as a second, capped-at-6, unranked queue (Minerva flagged
+  // the overlap 2026-09-22: "are these not the ones in the today page area
+  // and already scored?"). Today keeps only what genuinely needs same-day
+  // attention: follow-ups and brand-new unscored matches.
   const activeApplications = useMemo(
     () => applications.filter((a) => /^(applied|responded|interview|offer)/i.test(a.status)).slice(0, 8),
     [applications],
@@ -89,7 +89,7 @@ export function TodayDashboard({
   // rule as any other terminal decision on this dashboard.
   const visibleFresh = useMemo(() => fresh.filter((o) => !passed.has(o.url)), [fresh, passed]);
   const newThisWeek = visibleFresh.length;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  const allClear = newThisWeek === 0 && overdue === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
   const pipelineMatches = useMemo(() => visibleFresh.filter((o) => inboxUrls.has(o.url)), [visibleFresh, inboxUrls]);
   const unqueuedMatches = useMemo(() => visibleFresh.filter((o) => !inboxUrls.has(o.url)), [visibleFresh, inboxUrls]);
@@ -169,17 +169,6 @@ export function TodayDashboard({
         </Section>
       )}
 
-      {/* B. Awaiting your decision */}
-      {awaiting.length > 0 && (
-        <Section icon={CircleHelp} title="Awaiting your decision" hint="Scored — apply or skip">
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            {awaiting.map((a) => (
-              <DecisionCard key={a.n} app={a} />
-            ))}
-          </div>
-        </Section>
-      )}
-
       {pipelineMatches.length > 0 && (
         <Section icon={CircleHelp} title="In pipeline — choose the next step" hint="Evaluate to advance, or dismiss with a reason">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -208,7 +197,7 @@ export function TodayDashboard({
         <div className="mt-8 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
           <Sparkles className="mx-auto size-6 text-brand" />
           <p className="mx-auto mt-3 max-w-md text-sm text-muted">
-            Nothing needs you right now. Run a <Link href="/explore" className="text-brand hover:underline">free scan</Link> to surface this week&apos;s roles, or check your <Link href="/pipeline" className="text-brand hover:underline">pipeline</Link>.
+            Nothing needs you right now. Run a <Link href="/explore" className="text-brand hover:underline">free scan</Link> to surface this week&apos;s roles, check your <Link href="/pipeline" className="text-brand hover:underline">pipeline</Link>, or review <Link href="/leads" className="text-brand hover:underline">Top Leads</Link>.
           </p>
         </div>
       )}

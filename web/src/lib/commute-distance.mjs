@@ -24,6 +24,17 @@ const PLACES = {
   "new york ny": [40.7128, -74.0060], "new york city ny": [40.7128, -74.0060],
   "hyattsville md": [38.9559, -76.9455], "austin tx": [30.2672, -97.7431],
   "birmingham al": [33.5186, -86.8104],
+  // Added 2026-09-22 after two postings (Trenton, Cedar Knolls) silently
+  // passed the commute-radius gate below because they weren't in this table —
+  // `estimateCommuteMiles` returns null (not "far"; unresolved) for any town
+  // not listed here, and the gate at whats-new/route.ts only excludes a KNOWN
+  // distance over the max, so an unlisted town reads as "no evidence it's
+  // too far" rather than being flagged. Cedar Knolls in particular looks
+  // close on a map but resolves to ~18mi road distance, over the 15mi max.
+  // Extend this table (verified coordinates only, e.g. via a places/geocoding
+  // search — never guessed) as new out-of-table towns turn up; the catalog is
+  // deliberately Minerva's active search area, not all ~565 NJ municipalities.
+  "trenton nj": [40.2203, -74.7658], "cedar knolls nj": [40.8220, -74.4488],
 };
 
 const normalize = (s) => String(s || "").toLowerCase().replace(/\b(united states|usa|us)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();

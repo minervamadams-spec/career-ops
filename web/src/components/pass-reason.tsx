@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 export const SKIP_REASONS: { id: string; label: string }[] = [
   { id: "not_my_domain", label: "Not my domain" },
   { id: "location_or_remote_restricted", label: "Location/remote" },
+  { id: "outside_commute_radius", label: "Outside commute radius" },
   { id: "expired_listing", label: "Expired listing" },
   { id: "unwanted_part_time_or_fractional", label: "Unwanted part-time/fractional" },
   { id: "duplicate_of_existing", label: "Already applied elsewhere" },

@@ -145,6 +145,7 @@ console.log('skip-reasons taxonomy');
   ok('taxonomy has at least 10 reasons', reasons.length >= 10);
   ok('taxonomy includes not_my_domain', reasons.some(r => r.id === 'not_my_domain'));
   ok('taxonomy includes comp_too_low', reasons.some(r => r.id === 'comp_too_low'));
+  ok('taxonomy includes outside_commute_radius', reasons.some(r => r.id === 'outside_commute_radius'));
   ok('every reason has a non-empty id and label', reasons.every(r => r.id && r.label));
 
   ok('resolveSkipReason resolves by exact id', resolveSkipReason('not_my_domain', reasons) === 'not_my_domain');

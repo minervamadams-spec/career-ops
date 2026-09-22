@@ -16,6 +16,14 @@ reasons:
     label: "Not my domain"
   - id: location_or_remote_restricted
     label: "Location/remote restricted"
+  - id: outside_commute_radius
+    # Distinct from location_or_remote_restricted: this is specifically "the
+    # onsite/hybrid location is further than I'll commute", not "remote isn't
+    # offered" or "the JD excludes my state". Added 2026-09-22 after Trenton/
+    # Cedar Knolls, NJ postings surfaced despite being outside the 15mi
+    # max_commute_miles radius — see web/src/lib/commute-distance.mjs's PLACES
+    # table, which only auto-filters towns it has coordinates for.
+    label: "Outside commute radius"
   - id: expired_listing
     label: "Expired listing"
   - id: unwanted_part_time_or_fractional

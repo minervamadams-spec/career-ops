@@ -14,7 +14,12 @@ const TOP_THRESHOLD = 4.0;
 export default function LeadsPage() {
   const { applications } = pipelineSummary();
   const evaluated = applications
-    .filter((a) => /^evaluat/i.test(a.status))
+    // "?" is the documented unknown-end-employer marker (AGENTS.md) — nothing
+    // actionable can happen against a company you can't identify (research it,
+    // verify it's legitimate, or point a tailored resume at it), so it never
+    // belongs in a queue built for exactly those actions. Still fully visible
+    // in Pipeline, just not here (Minerva, 2026-09-22: "shouldn't even show").
+    .filter((a) => /^evaluat/i.test(a.status) && a.company.trim() && a.company.trim() !== "?")
     .map((a) => ({ ...a, scoreValue: scoreNum(a.score) }))
     .sort((a, b) => (Number.isNaN(b.scoreValue) ? -1 : b.scoreValue) - (Number.isNaN(a.scoreValue) ? -1 : a.scoreValue));
 
