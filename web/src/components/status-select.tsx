@@ -4,18 +4,23 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { CANONICAL_STATES } from "@/lib/format";
-import { PassReasonPrompt } from "@/components/pass-reason";
+import { PassReasonPrompt, type PassReasonSelection } from "@/components/pass-reason";
 
-const PASS_STATES = new Set(["Discarded", "SKIP"]);
+// SKIP only — a self-filter decision (patterns.md's classification table).
+// Discarded ("company said no / offer closed") commits immediately with no
+// reason capture, same as Applied/Interview/etc: prompting for a "why are you
+// passing" reason there is what produced the 72 Discarded rows carrying
+// self-filter "Passed:" language that analyze-patterns.mjs's classification
+// assumed could never happen (career-ops offerly scoring brief, 2026-09-22).
+const REASON_REQUIRED_STATES = new Set(["SKIP"]);
 
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
-// terminal-popup animation. Discarded/SKIP go through the same "why are you
-// passing?" capture the Today dashboard's decision cards already use — the
-// reason lands in the tracker's Notes cell AND, for a location reason,
-// generalizes into a standing exclusion (see /api/status's lead-feedback
-// write) so a company you've passed on for being too far doesn't keep
-// resurfacing.
+// terminal-popup animation. SKIP goes through the structured skip-reason
+// taxonomy capture — the reason lands in the tracker's Notes cell as a
+// `reason={id}` tag AND generalizes into a standing exclusion (see
+// /api/status's lead-feedback write) so a company you've passed on for being
+// too far doesn't keep resurfacing.
 export function StatusSelect({ n, current, company }: { n: string; current: string; company: string }) {
   const [status, setStatus] = useState(current);
   const [saved, setSaved] = useState(false);
@@ -23,7 +28,7 @@ export function StatusSelect({ n, current, company }: { n: string; current: stri
   const [pending, setPending] = useState<string | null>(null);
   const router = useRouter();
 
-  async function commit(next: string, note?: string) {
+  async function commit(next: string, selection?: PassReasonSelection) {
     const prev = status;
     setStatus(next);
     setBusy(true);
@@ -31,7 +36,12 @@ export function StatusSelect({ n, current, company }: { n: string; current: stri
       const res = await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ n, status: next, ...(note ? { note: `Passed: ${note}` } : {}) }),
+        body: JSON.stringify({
+          n,
+          status: next,
+          ...(selection?.reasonId ? { reasonId: selection.reasonId } : {}),
+          ...(selection?.text ? { note: selection.text } : {}),
+        }),
       });
       if (!res.ok) throw new Error("write failed");
       setSaved(true);
@@ -47,7 +57,7 @@ export function StatusSelect({ n, current, company }: { n: string; current: stri
 
   function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const next = e.target.value;
-    if (PASS_STATES.has(next)) {
+    if (REASON_REQUIRED_STATES.has(next)) {
       setPending(next);
       return;
     }
@@ -59,8 +69,9 @@ export function StatusSelect({ n, current, company }: { n: string; current: stri
       <PassReasonPrompt
         company={company}
         busy={busy}
-        confirmLabel={(hasReason) => (hasReason ? `Set ${pending} with reason` : `Set ${pending} without a reason`)}
-        onConfirm={(reason) => commit(pending, reason)}
+        reasonRequired
+        confirmLabel={(hasReason) => (hasReason ? `Set ${pending} with reason` : `Pick a reason to set ${pending}`)}
+        onConfirm={(selection) => commit(pending, selection)}
         onCancel={() => setPending(null)}
       />
     );

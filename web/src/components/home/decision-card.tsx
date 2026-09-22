@@ -7,33 +7,41 @@ import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import type { Application } from "@/lib/career-ops";
-import { PassReasonPrompt, rememberPassReason } from "@/components/pass-reason";
+import { PassReasonPrompt, rememberPassReason, selectionToText, type PassReasonSelection } from "@/components/pass-reason";
 
 // Awaiting-decision row: a scored role with no terminal status. One-tap Apply /
 // Skip writes back through the EXISTING /api/status (UPDATE-only, canonical states).
-// Skip's optional "why" is dual-purpose: it lands in the tracker's Notes cell
-// (audit trail, same as `set-status.mjs --note`) AND — only when a reason is
-// given — as a durable fact via /api/memory, which every future evaluation
-// prompt reads back (see api/run's buildPrompt "Durable notes about the
-// user"). That's the whole feedback loop: say why once, future scores account
-// for it. Both live in modes/_profile.md / data/applications.md — user-layer
-// files a `career-ops update` never touches, so this stays local by default.
+// Skip sets status SKIP (self-filtered, per patterns.md's classification table —
+// NOT Discarded, which means "company said no / offer closed") and requires a
+// taxonomy reason, which lands in the tracker's Notes cell as a `reason={id}`
+// tag (audit trail, same as `set-status.mjs --reason`) AND as a durable fact via
+// /api/memory, which every future evaluation prompt reads back (see api/run's
+// buildPrompt "Durable notes about the user"). That's the whole feedback loop:
+// say why once, future scores account for it. Both live in modes/_profile.md /
+// data/applications.md — user-layer files a `career-ops update` never touches,
+// so this stays local by default.
 export function DecisionCard({ app }: { app: Application }) {
   const router = useRouter();
-  const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
+  const [busy, setBusy] = useState<"" | "Applied" | "SKIP">("");
   const [done, setDone] = useState<string | null>(null);
   const [askingWhy, setAskingWhy] = useState(false);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
 
-  const setStatus = async (status: "Applied" | "Discarded", passReason?: string) => {
+  const setStatus = async (status: "Applied" | "SKIP", selection?: PassReasonSelection) => {
     setBusy(status);
     try {
       await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ n: app.n, status, ...(passReason ? { note: `Passed: ${passReason}` } : {}) }),
+        body: JSON.stringify({
+          n: app.n,
+          status,
+          ...(selection?.reasonId ? { reasonId: selection.reasonId } : {}),
+          ...(selection?.text ? { note: selection.text } : {}),
+        }),
       });
+      const passReason = selection ? selectionToText(selection) : "";
       if (passReason) rememberPassReason(app.company, app.role, passReason);
       setDone(status);
       router.refresh();
@@ -50,8 +58,9 @@ export function DecisionCard({ app }: { app: Application }) {
     return (
       <PassReasonPrompt
         company={app.company}
-        busy={busy === "Discarded"}
-        onConfirm={(reason) => setStatus("Discarded", reason)}
+        busy={busy === "SKIP"}
+        reasonRequired
+        onConfirm={(selection) => setStatus("SKIP", selection)}
         onCancel={() => setAskingWhy(false)}
       />
     );
@@ -95,7 +104,7 @@ export function DecisionCard({ app }: { app: Application }) {
           onClick={() => setAskingWhy(true)}
           className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px] max-sm:px-4"
         >
-          {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip
+          {busy === "SKIP" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip
         </button>
         <a href={`/pipeline/${app.n}`} title="Open report" aria-label="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1.5 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
           <FileText className="size-4" />

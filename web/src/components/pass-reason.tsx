@@ -4,11 +4,26 @@ import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
-// Common, low-friction reasons — a tap beats typing for the 80% case; the free
-// text field still catches anything sharper. Shared between every surface that
-// lets the user pass on a lead (scored decision cards, raw discovery cards) so
-// the reasons stay consistent and worth aggregating later.
-export const PASS_REASONS = ["Comp too low", "Wrong seniority", "Location/remote", "Not my domain", "Culture/red flag", "Already applied elsewhere"];
+// Structured self-filter taxonomy — mirrors templates/skip-reasons.yml (the
+// server-side source of truth, read live by web/src/lib/core/skip-reasons.ts
+// and set-status.mjs). Kept as a client-safe constant here the same way
+// web/src/lib/format.ts's CANONICAL_STATES mirrors templates/states.yml —
+// update both together if the taxonomy changes.
+export const SKIP_REASONS: { id: string; label: string }[] = [
+  { id: "not_my_domain", label: "Not my domain" },
+  { id: "location_or_remote_restricted", label: "Location/remote" },
+  { id: "expired_listing", label: "Expired listing" },
+  { id: "unwanted_part_time_or_fractional", label: "Unwanted part-time/fractional" },
+  { id: "duplicate_of_existing", label: "Already applied elsewhere" },
+  { id: "not_qualified", label: "Not qualified" },
+  { id: "travel_required", label: "Travel required" },
+  { id: "comp_too_low", label: "Comp too low" },
+  { id: "wrong_seniority", label: "Wrong seniority" },
+  { id: "undesired_shift_or_schedule", label: "Undesired shift/schedule" },
+  { id: "skill_or_background_mismatch", label: "Skill/background mismatch" },
+];
+
+export type PassReasonSelection = { reasonId: string | null; text: string };
 
 export type LeadFeedback = {
   url: string;
@@ -19,58 +34,71 @@ export type LeadFeedback = {
   inPipeline: boolean;
 };
 
-/** Inline "why are you passing?" capture — chips + free text, confirm/cancel.
- *  Reason is optional: `onConfirm(undefined)` fires from the no-reason path. */
+/** Inline "why are you passing?" capture — taxonomy chips + free text,
+ *  confirm/cancel. Set `reasonRequired` to block confirm until a chip is
+ *  picked (the SKIP tracker-status flow); omit it for the lighter-weight
+ *  raw-lead dismissal flow, where a reason stays optional. */
 export function PassReasonPrompt({
   company,
   busy,
+  reasonRequired,
   confirmLabel,
   onConfirm,
   onCancel,
 }: {
   company: string;
   busy?: boolean;
+  reasonRequired?: boolean;
   confirmLabel?: (hasReason: boolean) => string;
-  onConfirm: (reason: string | undefined) => void;
+  onConfirm: (selection: PassReasonSelection) => void;
   onCancel: () => void;
 }) {
-  const [reason, setReason] = useState("");
-  const label = confirmLabel ?? ((hasReason: boolean) => (hasReason ? "Skip with reason" : "Skip without a reason"));
+  const [reasonId, setReasonId] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const hasReason = reasonId != null || text.trim().length > 0;
+  const canConfirm = reasonRequired ? reasonId != null : true;
+  const label = confirmLabel ?? ((hasReason_: boolean) => (hasReason_ ? "Skip with reason" : "Skip without a reason"));
+
+  function confirm() {
+    if (busy || !canConfirm) return;
+    onConfirm({ reasonId, text: text.trim() });
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5">
       <p className="truncate text-xs text-muted">
-        Why pass on <span className="font-medium text-foreground">{company}</span>? Optional — helps future scoring.
+        Why pass on <span className="font-medium text-foreground">{company}</span>?
+        {reasonRequired ? " Pick one." : " Optional — helps future scoring."}
       </p>
       <div className="flex flex-wrap gap-1.5">
-        {PASS_REASONS.map((r) => (
+        {SKIP_REASONS.map((r) => (
           <button
-            key={r}
+            key={r.id}
             type="button"
-            onClick={() => setReason(r)}
+            onClick={() => setReasonId(r.id)}
             className={cn(
               "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors max-sm:min-h-[32px]",
-              reason === r ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:border-brand/30 hover:text-foreground",
+              reasonId === r.id ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:border-brand/30 hover:text-foreground",
             )}
           >
-            {r}
+            {r.label}
           </button>
         ))}
       </div>
       <input
         type="text"
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            if (!busy) onConfirm(reason.trim() || undefined);
+            confirm();
           } else if (e.key === "Escape") {
             e.preventDefault();
             onCancel();
           }
         }}
-        placeholder="Or type your own reason…"
+        placeholder={reasonRequired ? "Add detail (optional)…" : "Or type your own reason…"}
         maxLength={300}
         autoFocus
         className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs text-foreground placeholder:text-faint focus:border-brand/40 focus:outline-none"
@@ -78,12 +106,12 @@ export function PassReasonPrompt({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={!!busy}
-          onClick={() => onConfirm(reason.trim() || undefined)}
+          disabled={!!busy || !canConfirm}
+          onClick={confirm}
           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 disabled:opacity-60 max-sm:min-h-[44px]"
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-          {label(!!reason.trim())}
+          {label(hasReason)}
         </button>
         <button
           type="button"
@@ -96,6 +124,15 @@ export function PassReasonPrompt({
       </div>
     </div>
   );
+}
+
+/** Compose a display string from a selection — reason label plus optional
+ *  free text — for surfaces that only want one string (rememberPassReason,
+ *  recordLeadDismissal). Returns "" when nothing was picked or typed. */
+export function selectionToText(selection: PassReasonSelection): string {
+  const label = selection.reasonId ? (SKIP_REASONS.find((r) => r.id === selection.reasonId)?.label ?? "") : "";
+  if (label && selection.text) return `${label} — ${selection.text}`;
+  return label || selection.text;
 }
 
 /** Fire-and-forget durable-fact write — the shared "learn from it" hook every

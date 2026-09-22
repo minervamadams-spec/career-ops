@@ -8,7 +8,7 @@ import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { PassReasonPrompt } from "@/components/pass-reason";
+import { PassReasonPrompt, selectionToText } from "@/components/pass-reason";
 import { JobCardSignals } from "@/components/job-card-signals";
 import { cn } from "@/lib/cn";
 
@@ -54,7 +54,7 @@ export function TriageRow({
   if (askingWhy) {
     return (
       <li className="px-3 py-2.5 sm:px-4">
-        <PassReasonPrompt company={job.company} onConfirm={(reason) => onSkip(reason)} onCancel={() => setAskingWhy(false)} />
+        <PassReasonPrompt company={job.company} onConfirm={(selection) => onSkip(selectionToText(selection) || undefined)} onCancel={() => setAskingWhy(false)} />
       </li>
     );
   }

@@ -279,6 +279,61 @@ cover_letter:
 #   triage_threshold: 3.5
 #   triage_min_urls: 5
 
+# ── Hard Filters ─────────────────────────────────────────────────────────
+#
+# Deterministic, non-negotiable exclusions enforced directly in scan.mjs (not
+# just prompt context for the evaluation model). A posting that trips one of
+# these is dropped before it ever reaches data/pipeline.md, the same as
+# title_filter in portals.yml. Optional — omit the whole block, or any key
+# inside it, to keep today's behavior (no hard filtering).
+#
+# hard_filters:
+#   # Title keywords that disqualify a posting outright (case-insensitive
+#   # substring; short 2-3 letter entries match on word boundaries).
+#   titles_excluded:
+#     - "VP"
+#     - "Head of"
+#   # JD-description keywords for shifts you won't work.
+#   shifts_excluded:
+#     - "Night shift"
+#     - "On-call 24/7"
+#   # Max acceptable travel %, matched against JD phrases like "up to 25% travel".
+#   travel_max_pct: 5
+#   # Role categories to exclude regardless of title match (keyword substring
+#   # against title + description).
+#   excluded_role_types:
+#     - "Pure engineering"
+#     - "AI data labeling or rater gig work"
+#   # Proxy for "large company" (no headcount data exists at scan time) — a
+#   # posting from one of these is checked against
+#   # large_company_titles_excluded below. Substring match on the company name.
+#   known_large_companies:
+#     - "Regeneron"
+#     - "Netflix"
+#   # Applied ONLY to postings that already matched known_large_companies.
+#   # Deliberately broader than titles_excluded (e.g. adds "Director") because
+#   # the combination big-company + senior-but-not-VP title is the actual signal.
+#   large_company_titles_excluded:
+#     - "VP"
+#     - "Director"
+#     - "Head of"
+#   # Local/government postings stay exempt from the large-company gate even if
+#   # a future known_large_companies entry happens to match (keyword substring
+#   # against company + location).
+#   local_government_exempt_keywords:
+#     - "County"
+#     - "Township"
+#   # Hourly-rate floor for Track B (part-time/fractional) postings whose JD
+#   # states an hourly rate below this.
+#   track_b_hourly_rate_min: 25
+#   # Per-company waiver with a visible, auditable reason — mirrors the
+#   # "large-corp penalty waived per local-office rule" notes convention.
+#   # `company` is matched case-insensitively as a substring.
+#   overrides:
+#     - company: "Acme Corp"
+#       reason: "Local NJ office confirmed — waiving large-company gate"
+#   notes: "Free-text context surfaced to the evaluation model; not enforced by code."
+
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #
 # Define cooldown windows for companies where you've recently applied.

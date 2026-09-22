@@ -257,3 +257,5 @@ For reference, outcomes are classified as:
 | Rejected, Discarded | **Negative** (company said no or offer closed) |
 | SKIP, NO APLICAR | **Self-filtered** (user decided not to apply) |
 | Evaluated | **Pending** (no action taken yet) |
+
+**Discarded is never a self-filter decision — see AGENTS.md's Canonical States table.** A row that mixes the two (Discarded status + a self-filter `Passed:`/`reason=` note) corrupts this table's math; `analyze-patterns.mjs` still reports it (`skipReasonBreakdown`, `discardReasonStats`) but treat it as a data-quality flag, not a real self-filtered-under-Discarded pattern.

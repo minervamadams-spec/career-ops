@@ -9,7 +9,7 @@ import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { useJobs } from "@/components/jobs/job-store";
 import { JobCardSignals } from "@/components/job-card-signals";
 import { useExplore } from "./explore-provider";
-import { PassReasonPrompt } from "@/components/pass-reason";
+import { PassReasonPrompt, selectionToText } from "@/components/pass-reason";
 import { useBatchedLogo } from "@/lib/logo-client";
 
 function freshness(postedAt: string): string {
@@ -86,7 +86,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN, source = "explore
   if (dismissed) return null;
 
   if (askingWhy) {
-    return <PassReasonPrompt company={offer.company} onConfirm={(reason) => { pass(offer, reason, { source, inPipeline }); setAskingWhy(false); setDismissed(true); }} onCancel={() => setAskingWhy(false)} />;
+    return <PassReasonPrompt company={offer.company} onConfirm={(selection) => { pass(offer, selectionToText(selection) || undefined, { source, inPipeline }); setAskingWhy(false); setDismissed(true); }} onCancel={() => setAskingWhy(false)} />;
   }
 
   const detailHref = `/explore/job?${new URLSearchParams({ url: offer.url, company: offer.company, title: offer.title, location: offer.location || "", ats: offer.ats, posted: offer.postedAt || "", ...(offer.why ? { why: offer.why } : {}), ...(offer.note ? { note: offer.note } : {}), ...(offer.compensation ? { compensation: offer.compensation } : {}), ...(typeof offer.commuteMiles === "number" ? { commute: String(offer.commuteMiles) } : {}), ...(offer.commuteApprox ? { commuteApprox: "1" } : {}) }).toString()}`;
