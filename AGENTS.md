@@ -97,7 +97,9 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS), filtered by portals.yml `title_filter`/`location_filter` — no company list needed; checkpoints every 500 companies, `--resume` continues an interrupted sweep |
 | `scan-interamt.mjs` | Playwright browser scanner for Interamt.de (German public sector portal — Apache Wicket, no REST API) |
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text) |
-| `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
+| `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--reason] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write. `--reason <id>` is required when `<State>` is SKIP (validated against `templates/skip-reasons.yml`; `--force` bypasses it) — see the `reason=` Notes tag below |
+| `backfill-archetype-companysize.mjs` | Deterministic (zero-LLM-cost) archetype/company-size tagger for tracker rows with no linked report — title/company keyword matching against `config/profile.yml`'s archetypes and `hard_filters.known_large_companies`; writes the reversible `data/archetype-tags.json` sidecar, never rewrites `applications.md` (`--dry-run`, `--json`) |
+| `reclassify-self-filtered-discarded.mjs` | One-time migration: flips Discarded rows carrying self-filter `Passed:` language to SKIP via `set-status.mjs` (locked, atomic, status-log-audited), mapping the existing free-text reason to the `templates/skip-reasons.yml` taxonomy (`--dry-run`, `--json`) |
 | `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
 | `paste-reply.mjs` | Manual/no-Gmail input into reply-watch classification — normalizes a pasted/file email (subject/from/body) and appends to `data/reply-candidates.json`; never overwrites entries, never classifies, never touches the tracker |
 | `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |
@@ -412,10 +414,12 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 
 **Optional `track=` marker in notes (added 2026-08-13, for users running more than one concurrent search track — e.g. a full-time search plus a supplemental/fractional one):** when `config/profile.yml` defines a `tracks:` block, prefix the notes column with `track={key} — ` (e.g. `track=A — Boutique PM shop, remote`) so per-track filtering (dashboard board view, stats) can regex it back out. This is deliberately plain notes text, not a positional TSV extra like `via=` — it needs no schema/column migration, so it's safe to adopt even on an existing tracker with rows that predate it (they just have no track marker and show as unclassified, never rejected). `merge-tracker.mjs` requires no changes to support this: notes is already free text.
 
+**Required `reason=` marker in notes on a transition to SKIP (added 2026-09-22):** a self-filter decision (patterns.md's classification table: SKIP = self-filtered, Discarded = company said no / offer closed) must carry a structured reason from `templates/skip-reasons.yml`, written as a `reason={id} — Passed: {label}` prefix on the notes column (e.g. `reason=not_my_domain — Passed: Not my domain`) — same Notes-prefix convention as `track=`, no schema migration. `set-status.mjs --reason <id>` and the web app's SKIP flow both write it; `set-status.mjs` refuses a bare SKIP without one unless `--force` records an explicit decision to skip capturing it. `analyze-patterns.mjs` reads the tag into `skipReasonBreakdown` (structured) and still parses free-text `Passed:`/`DISCARD:`/`SKIP:` notes into `discardReasonStats` for rows written before this convention existed. Discarded never takes a reason — see the states table below.
+
 ### Pipeline Integrity
 
 1. **NEVER edit applications.md to ADD new entries** -- write TSV in `batch/tracker-additions/` and let `merge-tracker.mjs` merge.
-2. **UPDATE status/notes of existing entries via `node set-status.mjs <report#|company> <State> [--note]`** — the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
+2. **UPDATE status/notes of existing entries via `node set-status.mjs <report#|company> <State> [--note] [--reason <id>]`** — the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
 3. All reports MUST include `**URL:**` in the header (between Score and PDF), and `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
 4. All statuses MUST be canonical (see `templates/states.yml`).
 5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs`
@@ -433,10 +437,11 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 | `Offer` | Offer received |
 | `Hired` | Offer accepted — landed the job (terminal success) |
 | `Rejected` | Rejected by company |
-| `Discarded` | Discarded by candidate or offer closed |
-| `SKIP` | Doesn't fit, don't apply |
+| `Discarded` | Offer closed or company said no by some other route (never a self-filter decision — see `SKIP`) |
+| `SKIP` | Candidate self-filtered — doesn't fit, don't apply. Requires a `reason=` tag (see above) |
 
 **RULES:**
 - No markdown bold (`**`) in status field
 - No dates in status field (use the date column)
 - No extra text (use the notes column)
+- **Discarded is never a self-filter decision.** If the candidate decided not to apply, the status is `SKIP` with a `reason=` tag, not `Discarded` — mixing the two corrupts `analyze-patterns.mjs`'s outcome classification (patterns.md's table assumes they never overlap). A historical batch of 72 rows written before this rule was enforced was reclassified 2026-09-22 via `reclassify-self-filtered-discarded.mjs`.

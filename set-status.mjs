@@ -75,16 +75,18 @@ import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
+  loadSkipReasons, resolveSkipReason,
 } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
+const SKIP_REASONS_FILE = join(CAREER_OPS, 'templates/skip-reasons.yml');
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
 const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EXIT_AMBIGUOUS } = CLI_EXIT;
 
-const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
+const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--reason <id>] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
        node set-status.mjs --row N <state> [...]        (explicit tracker row ID)
        node set-status.mjs --report N <state> [...]     (explicit report ID)
 
@@ -93,11 +95,17 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
+  --reason <id>      Structured self-filter reason from templates/skip-reasons.yml
+                     (id or label, case-insensitive). REQUIRED when <state> is SKIP,
+                     unless --force. Written as a "reason={id} — ..." Notes prefix
+                     (same convention as the existing "track=" tag) so
+                     analyze-patterns.mjs can bucket on it, not just free Notes prose.
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
   --force            Allow a numeric selector despite a report-link mismatch, or despite a
-                     report-less row whose number another row claims as its report link
+                     report-less row whose number another row claims as its report link;
+                     also allows SKIP without --reason
   --dry-run          Resolve and validate, but write nothing
   --json             Machine-readable output on stdout (errors included)
 
@@ -109,8 +117,8 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, row: null, report: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report' };
+const flags = { note: null, reason: null, role: null, on: null, row: null, report: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--reason': 'reason', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report' };
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
@@ -211,6 +219,37 @@ const newStatus = resolveCanonicalState(stateInput, states);
 if (!newStatus) {
   const valid = states.map(s => s.label).join(' · ');
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
+}
+
+// ── skip-reason validation ───────────────────────────────────────
+//
+// A transition INTO SKIP is a self-filter decision (patterns.md's
+// classification table) and the whole point of the taxonomy is that it gets
+// captured AT the decision, not reconstructed later from free Notes prose.
+// Required unless --force records an explicit decision to skip it, mirroring
+// the report-mismatch guard's own --force semantics above.
+let skipReasonId = null;
+let skipReasonLabel = null;
+if (newStatus === 'SKIP') {
+  let skipReasons;
+  try {
+    skipReasons = loadSkipReasons(SKIP_REASONS_FILE);
+  } catch (err) {
+    failWith(EXIT_USAGE, 'skip-reasons-error', `Cannot load skip-reason taxonomy from ${SKIP_REASONS_FILE}: ${err.message}`);
+  }
+  if (flags.reason != null) {
+    skipReasonId = resolveSkipReason(flags.reason, skipReasons);
+    if (!skipReasonId) {
+      const valid = skipReasons.map(r => r.id).join(' · ');
+      failWith(EXIT_USAGE, 'invalid-reason', `"${flags.reason}" is not a recognized skip reason. Valid reasons: ${valid}`);
+    }
+    skipReasonLabel = skipReasons.find(r => r.id === skipReasonId).label;
+  } else if (!flags.force) {
+    const valid = skipReasons.map(r => r.id).join(' · ');
+    failWith(EXIT_USAGE, 'reason-required',
+      `Setting SKIP requires --reason <id> from templates/skip-reasons.yml. Valid reasons: ${valid}\n` +
+      '(--force bypasses this if you really mean to skip without a captured reason.)');
+  }
 }
 
 // ── tracker access ───────────────────────────────────────────────
@@ -444,7 +483,14 @@ if (flags.role && !flags.force && !roleMatchesTarget) {
   );
 }
 const oldStatus = target.status;
-const note = flags.note != null ? cell(flags.note) : null;
+// A resolved skip reason becomes a `reason={id} — Passed: {label}` prefix
+// (mirrors the existing `track=`/`applying=yes` Notes-prefix convention —
+// see AGENTS.md), with any --note free text appended after it. Without a
+// reason (only reachable via --force), --note behaves exactly as before.
+const noteText = skipReasonId
+  ? `reason=${skipReasonId} — Passed: ${skipReasonLabel}${flags.note ? ` — ${flags.note}` : ''}`
+  : flags.note;
+const note = noteText != null ? cell(noteText) : null;
 
 // Rebuild only the matched line: change the Status cell, append the note, keep
 // every other cell exactly as parsed.

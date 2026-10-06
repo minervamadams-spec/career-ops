@@ -9,7 +9,7 @@ import { useJobs } from "@/components/jobs/job-store";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { scoreTone } from "@/lib/format";
 import type { Application } from "@/lib/career-ops";
-import { PassReasonPrompt } from "@/components/pass-reason";
+import { PassReasonPrompt, type PassReasonSelection } from "@/components/pass-reason";
 
 type Row = Application & { scoreValue: number };
 
@@ -39,13 +39,18 @@ export function LeadsTable({ top, rest, threshold }: { top: Row[]; rest: Row[]; 
     setSelected(new Set());
   };
 
-  const setStatus = async (n: string, status: "Applied" | "Discarded", note?: string) => {
+  const setStatus = async (n: string, status: "Applied" | "SKIP", selection?: PassReasonSelection) => {
     setBusy((b) => new Set(b).add(n));
     try {
       await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ n, status, ...(note ? { note } : {}) }),
+        body: JSON.stringify({
+          n,
+          status,
+          ...(selection?.reasonId ? { reasonId: selection.reasonId } : {}),
+          ...(selection?.text ? { note: selection.text } : {}),
+        }),
       });
       setDone((d) => new Set(d).add(n));
       router.refresh();
@@ -66,9 +71,9 @@ export function LeadsTable({ top, rest, threshold }: { top: Row[]; rest: Row[]; 
   if (top.length === 0 && rest.length === 0) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center text-sm text-muted">
-        No scored roles yet. Evaluate a prospect from your{" "}
-        <Link href="/pipeline" className="text-brand hover:underline">
-          Pipeline
+        No scored roles yet. Evaluate a prospect from{" "}
+        <Link href="/explore" className="text-brand hover:underline">
+          Explore
         </Link>{" "}
         to see it ranked here.
       </div>
@@ -118,7 +123,7 @@ export function LeadsTable({ top, rest, threshold }: { top: Row[]; rest: Row[]; 
                 askingWhy={askingWhy === row.n}
                 onSkip={() => setAskingWhy(row.n)}
                 onCancelSkip={() => setAskingWhy(null)}
-                onConfirmSkip={(reason) => setStatus(row.n, "Discarded", reason ? `Passed: ${reason}` : undefined)}
+                onConfirmSkip={(selection) => setStatus(row.n, "SKIP", selection)}
                 onApply={() => setStatus(row.n, "Applied")}
               />
             ))}
@@ -156,7 +161,7 @@ export function LeadsTable({ top, rest, threshold }: { top: Row[]; rest: Row[]; 
                       askingWhy={askingWhy === row.n}
                       onSkip={() => setAskingWhy(row.n)}
                       onCancelSkip={() => setAskingWhy(null)}
-                      onConfirmSkip={(reason) => setStatus(row.n, "Discarded", reason ? `Passed: ${reason}` : undefined)}
+                      onConfirmSkip={(selection) => setStatus(row.n, "SKIP", selection)}
                       onApply={() => setStatus(row.n, "Applied")}
                     />
                   ))}
@@ -192,7 +197,7 @@ function LeadRow({
   askingWhy: boolean;
   onSkip: () => void;
   onCancelSkip: () => void;
-  onConfirmSkip: (reason?: string) => void;
+  onConfirmSkip: (selection: PassReasonSelection) => void;
   onApply: () => void;
 }) {
   if (hidden) return null;
@@ -202,7 +207,7 @@ function LeadRow({
     return (
       <tr className="border-b border-border last:border-0">
         <td colSpan={7} className="px-3 py-3">
-          <PassReasonPrompt company={row.company} busy={busy} onConfirm={onConfirmSkip} onCancel={onCancelSkip} />
+          <PassReasonPrompt company={row.company} busy={busy} reasonRequired onConfirm={onConfirmSkip} onCancel={onCancelSkip} />
         </td>
       </tr>
     );

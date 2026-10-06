@@ -25,6 +25,23 @@ const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   : join(CAREER_OPS, 'applications.md');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
 
+// Deterministic archetype/companySize backfill sidecar (career-ops offerly
+// scoring brief, 2026-09-22; written by backfill-archetype-companysize.mjs).
+// A reversible, separately-reviewable JSON file rather than rewriting
+// applications.md or fabricating report files — see that script's header for
+// why. Consulted here ONLY as a fallback when a linked report supplies no
+// value, never to override real report data.
+const TAG_OVERRIDES_FILE = join(CAREER_OPS, 'data/archetype-tags.json');
+function loadTagOverrides() {
+  if (!existsSync(TAG_OVERRIDES_FILE)) return {};
+  try {
+    const doc = JSON.parse(readFileSync(TAG_OVERRIDES_FILE, 'utf-8'));
+    return doc && typeof doc === 'object' ? doc : {};
+  } catch {
+    return {};
+  }
+}
+
 const MACHINE_SUMMARY_FIELDS = new Set([
   'company',
   'role',
@@ -752,6 +769,7 @@ function analyze() {
   }
 
   // Enrich entries with report data and classification
+  const tagOverrides = loadTagOverrides();
   const enriched = entries.map(e => {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
     // Tracker links are relative to the tracker file's own directory (see
@@ -780,6 +798,14 @@ function analyze() {
     // Fallback: if report didn't have Remote field, try the notes column
     const remoteSource = reportData?.remote || e.notes || '';
     const teamSource = reportData?.teamSize || '';
+    const tagOverride = tagOverrides[String(e.num)];
+
+    // Deterministic backfill fallback: only consulted when the report (or its
+    // absence) leaves no real signal — a report's own value always wins.
+    const heuristicCompanySize = classifyCompanySize(teamSource);
+    const companySize = heuristicCompanySize !== 'unknown'
+      ? heuristicCompanySize
+      : (typeof tagOverride?.companySize === 'string' ? tagOverride.companySize : 'unknown');
 
     return {
       ...e,
@@ -788,7 +814,8 @@ function analyze() {
       score,
       report: reportData,
       remoteBucket: classifyRemote(remoteSource),
-      companySize: classifyCompanySize(teamSource),
+      companySize,
+      tagOverride,
       vendor: detectVendor(reportData?.url),
     };
   });
@@ -837,7 +864,7 @@ function analyze() {
   // --- Archetype breakdown ---
   const archetypeMap = new Map();
   for (const e of enriched) {
-    const arch = e.report?.archetype || 'Unknown';
+    const arch = e.report?.archetype || e.tagOverride?.archetype || 'Unknown';
     if (!archetypeMap.has(arch)) archetypeMap.set(arch, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
     const entry = archetypeMap.get(arch);
     entry.total++;
@@ -982,15 +1009,19 @@ function analyze() {
 
   // --- Discard reason analysis (Issue 1380) ---
 
-  // Aggregates user-committed `DISCARD: <reason>` or `SKIP: <reason>` tags in the Notes column.
+  // Aggregates user-committed `DISCARD: <reason>` / `SKIP: <reason>` tags AND
+  // the `Passed: <reason>` text the web app's status flow actually writes
+  // (career-ops offerly scoring brief, 2026-09-22 — the original regex here
+  // only matched DISCARD:/SKIP:, so it silently never fired on the 130
+  // hand-typed "Passed: ..." rows that are the overwhelming majority of real
+  // skip/discard notes; both forms are matched here now).
   const discardReasonCounts = new Map();
   for (const e of enriched) {
     if (e.outcome !== 'self_filtered' && e.outcome !== 'negative') continue;
-    // From tracker Notes column: "DISCARD: <reason>" or "SKIP: <reason>"
-    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
+    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP|Passed):\s*([^,;\n]+)/gi);
     if (notesMatch) {
       for (const m of notesMatch) {
-        const key = m.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
+        const key = m.replace(/^(?:DISCARD|SKIP|Passed):\s*/i, '').trim().toLowerCase();
         if (key) discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
       }
     }
@@ -998,6 +1029,32 @@ function analyze() {
   const discardReasonStats = [...discardReasonCounts.entries()]
     .map(([reason, frequency]) => ({
       reason,
+      frequency,
+      percentage: Math.round((frequency / enriched.length) * 100),
+    }))
+    .sort((a, b) => b.frequency - a.frequency);
+
+  // --- Structured skip-reason taxonomy (career-ops offerly scoring brief,
+  // 2026-09-22) ---
+  //
+  // The reliable signal going forward: a `reason={id}` Notes-prefix tag
+  // written by set-status.mjs --reason and the web app's SKIP flow (mirrors
+  // the existing `track=`/`applying=yes` Notes-prefix convention — see
+  // AGENTS.md). discardReasonStats above stays for free-text back-compat on
+  // rows that predate the tag; this is keyed by the canonical
+  // templates/skip-reasons.yml id, not free text, so it stays stable as a
+  // dashboard/filter key even as the underlying label text is edited.
+  const skipReasonCounts = new Map();
+  const REASON_TAG_RE = /(?:^|;\s*)reason=([a-z_]+)/i;
+  for (const e of enriched) {
+    const m = (e.notes || '').match(REASON_TAG_RE);
+    if (!m) continue;
+    const id = m[1].toLowerCase();
+    skipReasonCounts.set(id, (skipReasonCounts.get(id) || 0) + 1);
+  }
+  const skipReasonBreakdown = [...skipReasonCounts.entries()]
+    .map(([reasonId, frequency]) => ({
+      reasonId,
       frequency,
       percentage: Math.round((frequency / enriched.length) * 100),
     }))
@@ -1145,6 +1202,7 @@ function analyze() {
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
+    skipReasonBreakdown,
     recommendations,
   };
 }
@@ -1156,7 +1214,7 @@ function printSummary(result) {
     return;
   }
 
-  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, recommendations } = result;
+  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, skipReasonBreakdown, recommendations } = result;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Pattern Analysis — ${metadata.analysisDate}`);
@@ -1209,10 +1267,19 @@ function printSummary(result) {
 
   // Discard reasons
   if (discardReasonStats && discardReasonStats.length > 0) {
-    console.log('\nTOP DISCARD / SKIP REASONS');
+    console.log('\nTOP DISCARD / SKIP REASONS (free text)');
     console.log('-'.repeat(40));
     for (const d of discardReasonStats.slice(0, 10)) {
       console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
+    }
+  }
+
+  // Structured skip-reason taxonomy (templates/skip-reasons.yml ids)
+  if (skipReasonBreakdown && skipReasonBreakdown.length > 0) {
+    console.log('\nSKIP REASON TAXONOMY (structured)');
+    console.log('-'.repeat(40));
+    for (const s of skipReasonBreakdown.slice(0, 15)) {
+      console.log(`  ${s.reasonId.padEnd(35)} ${String(s.frequency).padStart(2)}x (${s.percentage}%)`);
     }
   }
 

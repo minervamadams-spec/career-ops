@@ -1,30 +1,46 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 // Offline commute estimates. Network geocoders make the Today page slow and
 // leak every viewed job location. Keep the user's origin in profile.yml and a
-// compact coordinate catalog for their active search area instead. Distances
-// are approximate road miles (great-circle distance × 1.18), clearly labeled.
+// bundled coordinate catalog instead. Distances are approximate road miles
+// (great-circle distance × 1.18), clearly labeled.
 const ORIGINS = { "07828": [40.8732, -74.7341] };
-const PLACES = {
-  "budd lake nj": [40.8732, -74.7341], "mount olive nj": [40.8518, -74.7327],
-  "flanders nj": [40.8468, -74.6943], "netcong nj": [40.8987, -74.7066],
-  "stanhope nj": [40.9029, -74.7091], "succasunna nj": [40.8684, -74.6404],
-  "roxbury nj": [40.8684, -74.6404], "ledgewood nj": [40.8754, -74.6543],
-  "kenvil nj": [40.8793, -74.6188], "wharton nj": [40.8932, -74.5818],
-  "dover nj": [40.8837, -74.5621], "rockaway nj": [40.9012, -74.5143],
-  "mine hill nj": [40.8784, -74.6021], "denville nj": [40.8923, -74.4774],
-  "randolph nj": [40.8478, -74.5749], "mount arlington nj": [40.9301, -74.6363],
-  "lake hopatcong nj": [40.9487, -74.6171], "hopatcong nj": [40.9329, -74.6593],
-  "byram nj": [40.9493, -74.7182], "jefferson township nj": [41.0020, -74.5563],
-  "chester nj": [40.7843, -74.6968], "mendham nj": [40.7759, -74.6007],
-  "long valley nj": [40.7857, -74.7802], "hackettstown nj": [40.8534, -74.8291],
-  "allamuchy nj": [40.9218, -74.8107], "andover nj": [40.9857, -74.7427],
-  "sparta nj": [41.0335, -74.6385], "fredon nj": [41.0387, -74.7802],
-  "green village nj": [40.7418, -74.4549], "dunellen nj": [40.5893, -74.4718],
-  "marlton nj": [39.8912, -74.9218], "morristown nj": [40.7968, -74.4815],
-  "newark nj": [40.7357, -74.1724], "jersey city nj": [40.7178, -74.0431],
+
+// Base catalog: all ~700 NJ Census-gazetteer "Place" entries (2021 Gazetteer
+// files, public domain — see nj-places.json's header comment), covering
+// incorporated cities/boroughs/towns/villages and CDPs statewide. Added
+// 2026-09-22 after Trenton and Cedar Knolls silently passed the commute-radius
+// gate (estimateCommuteMiles returned null — unresolved, not "far" — for any
+// town missing from what was then a 35-entry hand list, so the gate never
+// fired) — Minerva: "build the zip coordinate which I thought was done."
+const NJ_PLACES = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "nj-places.json"), "utf-8"),
+);
+
+// Gap-fill layer, takes precedence over NJ_PLACES. Two reasons an entry lives
+// here instead of the bundled file:
+//   1. NJ townships (Denville, Roxbury, Mine Hill, Jefferson, ...) are absent
+//      from the Census "Places" gazetteer entirely — in NJ, townships are
+//      also county subdivisions and that geography type isn't in the file
+//      this catalog was built from. Hand-verified so Minerva's actual local
+//      radius (Morris/Sussex/Warren county townships) stays covered.
+//   2. Non-NJ locations her search history has touched (NYC, and a handful of
+//      one-off out-of-state postings) — the bundled catalog is NJ-only by
+//      design (her active search area), so these stay a short manual list.
+const OVERRIDES = {
+  "denville nj": [40.8923, -74.4774], "randolph nj": [40.8478, -74.5749],
+  "roxbury nj": [40.8684, -74.6404], "mine hill nj": [40.8784, -74.6021],
+  "jefferson township nj": [41.0020, -74.5563], "byram nj": [40.9493, -74.7182],
+  "mount arlington nj": [40.9301, -74.6363], "lake hopatcong nj": [40.9487, -74.6171],
+  "green village nj": [40.7418, -74.4549],
   "new york ny": [40.7128, -74.0060], "new york city ny": [40.7128, -74.0060],
   "hyattsville md": [38.9559, -76.9455], "austin tx": [30.2672, -97.7431],
   "birmingham al": [33.5186, -86.8104],
 };
+
+const PLACES = { ...NJ_PLACES, ...OVERRIDES };
 
 const normalize = (s) => String(s || "").toLowerCase().replace(/\b(united states|usa|us)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 const rad = (n) => n * Math.PI / 180;

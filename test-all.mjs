@@ -281,6 +281,7 @@ const scripts = [
   { name: 'test-trust-validator.mjs', expectExit: 0 },
   { name: 'test-salary-filter.mjs', expectExit: 0 },
   { name: 'detect-reposts.test.mjs', expectExit: 0 },
+  { name: 'hard-filter.test.mjs', expectExit: 0 },
   { name: 'discover-ats.test.mjs', expectExit: 0 },
   { name: 'followup-cadence.test.mjs', expectExit: 0 },
   { name: 'process-quality.test.mjs', expectExit: 0 },
@@ -14507,8 +14508,9 @@ try {
   if (runRows[0] === SCAN_RUNS_HEADER.trim() && runRows.length === 3
       && runRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')
       // filtered_blacklist + filtered_visa + filtered_posted_date + filtered_country_eligibility
-      // land in the four trailing columns (last defaults to 0 — not supplied above).
-      && runRows[1].endsWith('\t4\t7\t2\t0')
+      // + filtered_hard_filter + filtered_repost land in the six trailing
+      // columns (all default to 0 — not supplied above).
+      && runRows[1].endsWith('\t4\t7\t2\t0\t0\t0')
       && runRows[2].startsWith('2026-07-04T09:00:00Z\t')) {
     pass('appendScanRunSummary writes the header once, appends one row per run');
   } else {

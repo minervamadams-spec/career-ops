@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
+import { resolveSkipReasonId, skipReasonLabel, readSkipReasons } from "@/lib/core/skip-reasons";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { categorizePassReason } from "@/lib/format";
 
@@ -12,13 +13,13 @@ import { categorizePassReason } from "@/lib/format";
 // value with table-breaking chars (| \r \n **) that would scramble the row; detect
 // the Status column from the header (8- and 9-col layouts); atomic write.
 export async function POST(req: Request) {
-  let body: { n?: string; status?: string; note?: string };
+  let body: { n?: string; status?: string; note?: string; reasonId?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
-  const { n, status, note: rawNote } = body;
+  const { n, status, note: rawNote, reasonId: rawReasonId } = body;
   if (!n || typeof status !== "string" || !status.trim()) {
     return NextResponse.json({ error: "n and status required" }, { status: 400 });
   }
@@ -29,14 +30,35 @@ export async function POST(req: Request) {
   if (!canon) {
     return NextResponse.json({ error: `not a canonical status: ${status}` }, { status: 400 });
   }
-  // Optional free-text reason (e.g. "why I'm passing on this one"). Sanitized
-  // the same way set-status.mjs's cell() helper treats free text headed for a
-  // table cell — strip table-breaking chars rather than reject, since this is
-  // a reason the user typed, not a controlled value like status.
-  const note =
+  // Optional free-text detail, appended after the reason (or standalone for any
+  // other status). Sanitized the same way set-status.mjs's cell() helper treats
+  // free text headed for a table cell — strip table-breaking chars rather than
+  // reject, since this is text the user typed, not a controlled value like status.
+  const freeText =
     typeof rawNote === "string" && rawNote.trim()
       ? rawNote.replace(/[\r\n]+/g, " ").replace(/\s*\|\s*/g, " / ").trim().slice(0, 300)
       : null;
+
+  // A transition INTO SKIP is a self-filter decision (patterns.md's
+  // classification table: SKIP = self-filtered, Discarded = company said no /
+  // offer closed) — mirrors set-status.mjs's own --reason requirement so the
+  // CLI and the UI can't drift on when a reason is mandatory. Discarded no
+  // longer prompts for one at all (see status-select.tsx / decision-card.tsx /
+  // leads-table.tsx — every UI path that used to write Discarded+"Passed:" now
+  // writes SKIP+reasonId instead).
+  let note: string | null = freeText;
+  if (canon === "SKIP") {
+    if (!rawReasonId || typeof rawReasonId !== "string") {
+      return NextResponse.json({ error: "reasonId required when status is SKIP" }, { status: 400 });
+    }
+    const resolvedId = resolveSkipReasonId(rawReasonId);
+    if (!resolvedId) {
+      const valid = readSkipReasons().map((r) => r.id).join(", ");
+      return NextResponse.json({ error: `unrecognized reasonId "${rawReasonId}". Valid: ${valid}` }, { status: 400 });
+    }
+    const label = skipReasonLabel(resolvedId);
+    note = `reason=${resolvedId} — Passed: ${label}${freeText ? ` — ${freeText}` : ""}`;
+  }
 
   const file = path.join(careerOpsRoot(), "data", "applications.md");
   let md: string;
@@ -114,7 +136,10 @@ export async function POST(req: Request) {
   // readLocationExcludedCompanies, which only reads category+company, not url.
   // Recording it here means passing on a role from the report page generalizes
   // the same way passing on a raw lead from Explore/Pipeline already does.
-  if (note && (canon === "Discarded" || canon === "SKIP") && rowCompany) {
+  // SKIP only — Discarded means "company said no / offer closed" now (patterns.md's
+  // classification table), never a self-filter decision, so it must not feed the
+  // location-exclusion / lead-feedback learning loop that "why I'm passing" drives.
+  if (note && canon === "SKIP" && rowCompany) {
     try {
       const category = categorizePassReason(note);
       const feedbackFile = path.join(careerOpsRoot(), "data", "lead-feedback.jsonl");

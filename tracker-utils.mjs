@@ -605,6 +605,46 @@ export function resolveCanonicalState(input, states) {
 }
 
 /**
+ * Load the structured self-filter reason taxonomy from
+ * `templates/skip-reasons.yml` — the single source of truth read live by
+ * set-status.mjs and web/src/lib/core/skip-reasons.ts, mirroring
+ * loadCanonicalStates' relationship to states.yml.
+ *
+ * @param {string} skipReasonsPath - Path to templates/skip-reasons.yml.
+ * @returns {{id:string,label:string}[]} Parsed reason entries.
+ */
+export function loadSkipReasons(skipReasonsPath) {
+  const doc = yaml.load(readFileSync(skipReasonsPath, 'utf-8'));
+  if (!doc || !Array.isArray(doc.reasons)) {
+    throw new Error(`Malformed skip-reasons file at ${skipReasonsPath}: expected a top-level "reasons" list`);
+  }
+  return doc.reasons.map(r => ({
+    id: String(r.id ?? ''),
+    label: String(r.label ?? ''),
+  }));
+}
+
+/**
+ * Resolve user input (an id or a label, case-insensitive) to a canonical
+ * skip-reason id, or null when unrecognized. Strict, like
+ * resolveCanonicalState — an unresolved reason must be rejected by the
+ * caller before it reaches the tracker, not silently dropped.
+ *
+ * @param {string} input - Raw reason text from the user or a script.
+ * @param {{id:string,label:string}[]} reasons - From loadSkipReasons().
+ * @returns {string|null} Canonical id (e.g. "not_my_domain"), or null.
+ */
+export function resolveSkipReason(input, reasons) {
+  const clean = foldStatusInput(input);
+  if (!clean) return null;
+  for (const r of reasons) {
+    if (r.id.toLowerCase() === clean) return r.id;
+    if (r.label.toLowerCase() === clean) return r.id;
+  }
+  return null;
+}
+
+/**
  * Canonical process-exit codes shared by every locked, single-purpose
  * tracker-writer CLI (set-status.mjs, mark-pdf-ready.mjs, ...) — one source
  * so a new script can't drift from the numbering an existing one already

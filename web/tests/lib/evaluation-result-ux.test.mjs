@@ -15,7 +15,7 @@ test("completed evaluations link directly to their useful Pipeline report", () =
   assert.match(route, /reason = reportText/);
   assert.match(store, /reportId\?: string/);
   assert.match(page, /View evaluation/);
-  assert.match(page, /Pipeline is Offerly&apos;s application tracker/);
+  assert.match(page, /The full report has the score, decision brief/);
 });
 
 test("full evaluation is disclosed before the user starts it", () => {

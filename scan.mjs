@@ -45,10 +45,12 @@ import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
+import { roleFuzzyMatch } from './role-matcher.mjs';
+import { parseScanHistory, companyKey as repostCompanyKey } from './detect-reposts.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
-import { appendWatchOffers, classifyTechnical, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack, notifySlackNoUpdates, reclassifyWatchHistory, technicalOffersForAlert } from './competitor-watch.mjs';
+import { appendWatchOffers, classifyTechnical, isCurrentWatchOffer, isHttpsUrl, loadSeenWatchUrls, normalizeWatchConfig, notifySlack, notifySlackNoUpdates, reclassifyWatchHistory, technicalOffersForAlert } from './competitor-watch.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -866,6 +868,141 @@ export function loadReApplyWindows(profilePath = PROFILE_PATH) {
   } catch {
     return {};
   }
+}
+
+// ── Hard filters (config/profile.yml `hard_filters`) ────────────────────
+//
+// Deterministic enforcement of the user's non-negotiable exclusions. Before
+// this, hard_filters was documentation-only prose that reached the scoring
+// model as context it could ignore — nothing in the code path read it. This
+// mirrors buildTitleFilter/buildLocationFilter: a job either passes or is
+// rejected with a specific, auditable reason (written to scan-history.tsv so
+// "why did this get filtered" is answerable without re-reading the config).
+//
+// A per-company `overrides` entry waives every rule for that company with a
+// visible reason, matching the informal "large-corp penalty waived per
+// local-office rule" note convention already used by hand in applications.md.
+export function loadHardFilters(profilePath = PROFILE_PATH) {
+  if (!existsSync(profilePath)) return null;
+  try {
+    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const hf = raw.hard_filters;
+    return hf && typeof hf === 'object' ? hf : null;
+  } catch {
+    return null;
+  }
+}
+
+const DEFAULT_LARGE_COMPANY_TITLES = ['vp', 'vice president', 'director', 'head of', 'svp', 'evp'];
+
+function normalizeStrList(v) {
+  return (Array.isArray(v) ? v : [])
+    .filter(k => typeof k === 'string')
+    .map(k => k.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+// Extracts a stated travel percentage from JD text, e.g. "up to 25% travel",
+// "travel: 10%", "requires 30% travel". Returns null when no percentage is
+// stated — silence is not evidence of over-travel, so an unmatched job passes.
+function extractTravelPct(descriptionLower) {
+  const m = descriptionLower.match(/(?:up to\s+)?(\d{1,3})\s*%\s*travel/) ||
+    descriptionLower.match(/travel[^.]{0,20}?(\d{1,3})\s*%/);
+  if (!m) return null;
+  const pct = parseInt(m[1], 10);
+  return Number.isFinite(pct) && pct >= 0 && pct <= 100 ? pct : null;
+}
+
+// Extracts the low end of a stated hourly rate, e.g. "$18-20/hr",
+// "$22 to $27 per hour". Returns null when no hourly rate is stated — most
+// full-time salaried postings never mention one, so this only fires on the
+// Track B / fractional listings the floor is meant for.
+function extractHourlyRateLow(descriptionLower) {
+  const m = descriptionLower.match(/\$\s*(\d{1,3}(?:\.\d{1,2})?)\s*(?:-|to|–|—)\s*\$?\s*\d{1,3}(?:\.\d{1,2})?\s*\/?\s*(?:per\s*)?(?:hour|hr)\b/) ||
+    descriptionLower.match(/\$\s*(\d{1,3}(?:\.\d{1,2})?)\s*\/?\s*(?:per\s*)?(?:hour|hr)\b/);
+  if (!m) return null;
+  const rate = parseFloat(m[1]);
+  return Number.isFinite(rate) ? rate : null;
+}
+
+/**
+ * Build the hard-filter predicate. Returns `() => ({ pass: true })` when
+ * hard_filters is absent/malformed — same "missing config never filters"
+ * default every other filter builder in this file uses.
+ *
+ * @param {object|null} hardFilters - config/profile.yml's `hard_filters` block.
+ * @returns {(job: {title?: string, description?: string, company?: string, location?: string}) => {pass: boolean, reason?: string, override?: string}}
+ */
+export function buildHardFilter(hardFilters) {
+  if (!hardFilters || typeof hardFilters !== 'object') {
+    return () => ({ pass: true });
+  }
+  const titleMatchers = normalizeStrList(hardFilters.titles_excluded).map(compileKeyword);
+  const shiftMatchers = normalizeStrList(hardFilters.shifts_excluded).map(compileKeyword);
+  const roleTypeMatchers = normalizeStrList(hardFilters.excluded_role_types).map(compileKeyword);
+  const travelMaxPct = Number.isFinite(hardFilters.travel_max_pct) ? hardFilters.travel_max_pct : null;
+  const knownLarge = normalizeStrList(hardFilters.known_large_companies);
+  const largeTitleList = normalizeStrList(hardFilters.large_company_titles_excluded);
+  const largeTitleMatchers = (largeTitleList.length ? largeTitleList : DEFAULT_LARGE_COMPANY_TITLES).map(compileKeyword);
+  const localExempt = normalizeStrList(hardFilters.local_government_exempt_keywords);
+  const hourlyFloor = Number.isFinite(hardFilters.track_b_hourly_rate_min) ? hardFilters.track_b_hourly_rate_min : null;
+  const overrides = Array.isArray(hardFilters.overrides)
+    ? hardFilters.overrides.filter(o => o && typeof o.company === 'string' && o.company.trim())
+    : [];
+
+  const overrideFor = (company) => {
+    const c = (company || '').toLowerCase();
+    const hit = overrides.find(o => c.includes(o.company.trim().toLowerCase()));
+    return hit ? (typeof hit.reason === 'string' && hit.reason.trim() ? hit.reason.trim() : 'override') : null;
+  };
+
+  const isLocalExempt = (company, location) => {
+    if (!localExempt.length) return false;
+    const text = `${company || ''} ${location || ''}`.toLowerCase();
+    return localExempt.some(k => text.includes(k));
+  };
+
+  return (job) => {
+    const title = (job.title || '').toLowerCase();
+    const description = (job.description || '').toLowerCase();
+    const company = job.company || '';
+    const override = overrideFor(company);
+
+    if (titleMatchers.some(m => m(title))) {
+      if (override) return { pass: true, override };
+      return { pass: false, reason: 'title_excluded' };
+    }
+    if (shiftMatchers.some(m => m(description))) {
+      if (override) return { pass: true, override };
+      return { pass: false, reason: 'shift_excluded' };
+    }
+    if (roleTypeMatchers.some(m => m(title) || m(description))) {
+      if (override) return { pass: true, override };
+      return { pass: false, reason: 'role_type_excluded' };
+    }
+    if (travelMaxPct != null) {
+      const pct = extractTravelPct(description);
+      if (pct != null && pct > travelMaxPct) {
+        if (override) return { pass: true, override };
+        return { pass: false, reason: `travel_exceeds_${pct}pct` };
+      }
+    }
+    if (knownLarge.length) {
+      const isLarge = knownLarge.some(k => company.toLowerCase().includes(k));
+      if (isLarge && largeTitleMatchers.some(m => m(title)) && !isLocalExempt(company, job.location)) {
+        if (override) return { pass: true, override };
+        return { pass: false, reason: 'large_company_senior_title' };
+      }
+    }
+    if (hourlyFloor != null) {
+      const rate = extractHourlyRateLow(description);
+      if (rate != null && rate < hourlyFloor) {
+        if (override) return { pass: true, override };
+        return { pass: false, reason: `hourly_rate_below_floor_${rate}` };
+      }
+    }
+    return { pass: true };
+  };
 }
 
 export function buildCooldownFilter(windows, today) {
@@ -1748,6 +1885,97 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   return { seen, recheckEligible, seenCompanyRoles, fingerprintHistory };
 }
 
+// ── Repost gate (wires detect-reposts.mjs's fuzzy clustering into the live
+// scan, instead of leaving it a manual npm script that only reports after the
+// fact) ──────────────────────────────────────────────────────────────────
+//
+// collectSeenCompanyRoles above dedups on an EXACT normalized company+role
+// key, which misses near-duplicate titles — "Business Operations & Project
+// Manager" vs "Business Operations & Project Manager (part-time)", or 8
+// separate "Clerk 1, {department}" sub-postings from the same county. Those
+// are exactly the reposts detect-reposts.mjs's fuzzy roleFuzzyMatch already
+// knows how to catch; this reuses that logic live, at the two places a repost
+// actually needs to be stopped:
+//   1. A company+role the tracker already decided against (SKIP/Discarded/
+//      Rejected) — resurfacing it is pure noise, regardless of scan-history.
+//   2. A company+role scan-history has already recorded as `added` before —
+//      the same signal detect-reposts.mjs's own clustering reports, applied
+//      proactively instead of only in a post-hoc `--summary` run.
+
+const DECIDED_AGAINST_STATUS_RE = /\b(skip|discard|reject|no_aplicar|no aplicar)/i;
+
+/**
+ * Company -> role titles the tracker already decided against (SKIP/Discarded/
+ * Rejected), for the repost gate's tier 1. Read straight from
+ * data/applications.md; a missing/unreadable tracker yields an empty map
+ * (never blocks a scan).
+ *
+ * @param {string} [applicationsPath] - Path to data/applications.md.
+ * @returns {Map<string, string[]>} companyKey() -> [role, role, ...]
+ */
+export function loadDecidedAgainstRolesByCompany(applicationsPath = APPLICATIONS_PATH) {
+  const map = new Map();
+  const text = readIfExists(applicationsPath);
+  if (!text) return map;
+  const lines = text.split('\n');
+  const colmap = resolveColumns(lines);
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row || !row.company || !row.role) continue;
+    if (!DECIDED_AGAINST_STATUS_RE.test(row.status || '')) continue;
+    const key = repostCompanyKey({ company: row.company, normCompany: normalizeCompanyName(row.company) });
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row.role);
+  }
+  return map;
+}
+
+/**
+ * Company -> role titles scan-history has already recorded with status
+ * `added`, for the repost gate's tier 2 (mirrors detect-reposts.mjs's own
+ * clustering input, minus the 2+/window bookkeeping — a live gate only needs
+ * "has this company+role been surfaced before", not a repost count).
+ *
+ * @param {string} [scanHistoryPath] - Path to data/scan-history.tsv.
+ * @returns {Map<string, string[]>} companyKey() -> [title, title, ...]
+ */
+export function loadScannedRolesByCompany(scanHistoryPath = SCAN_HISTORY_PATH) {
+  const map = new Map();
+  const text = readIfExists(scanHistoryPath);
+  if (!text) return map;
+  for (const row of parseScanHistory(text)) {
+    if (row.status !== 'added') continue;
+    const key = repostCompanyKey(row);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row.title);
+  }
+  return map;
+}
+
+/**
+ * Build the live repost gate. Returns `{ isRepost: false }` when neither
+ * source has any entries for the job's company (the common case — most
+ * companies have no history yet).
+ *
+ * @param {Map<string, string[]>} decidedAgainstByCompany
+ * @param {Map<string, string[]>} scannedByCompany
+ * @returns {(job: {title?: string, company?: string}) => {isRepost: boolean, reason?: string}}
+ */
+export function buildRepostGate(decidedAgainstByCompany, scannedByCompany) {
+  return (job) => {
+    const key = repostCompanyKey({ company: job.company, normCompany: normalizeCompanyName(job.company || '') });
+    const decided = decidedAgainstByCompany.get(key);
+    if (decided && decided.some(role => roleFuzzyMatch(job.title, role))) {
+      return { isRepost: true, reason: 'repost_of_decided_against' };
+    }
+    const scanned = scannedByCompany.get(key);
+    if (scanned && scanned.some(title => roleFuzzyMatch(job.title, title))) {
+      return { isRepost: true, reason: 'repost_of_scanned' };
+    }
+    return { isRepost: false };
+  };
+}
+
 // Standard skeleton created on fresh install — matches the format documented
 // in modes/pipeline.md and expected by /career-ops pipeline.
 const PIPELINE_SKELETON = `# Pipeline — Pending URLs
@@ -1896,7 +2124,7 @@ const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
 // writeRunFailureRow (#2643) so trend stats can exclude survivorship bias.
 // Consumers MUST parse by header name, never by position — columns may be
 // appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\tfiltered_hard_filter\tfiltered_repost\n';
 
 // Failure-path writes (#2643). main() registers a snapshot closure once the
 // sweep's counters exist (never on --dry-run, never before the sweep starts —
@@ -1938,6 +2166,10 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredPostedDate ?? 0,
     // filtered_country_eligibility (#2093) appended at the END for the same reason.
     c.filteredCountryEligibility ?? 0,
+    // filtered_hard_filter / filtered_repost (config/profile.yml hard_filters
+    // enforcement + tracked-pair repost dedup) appended at the END for the same reason.
+    c.filteredHardFilter ?? 0,
+    c.filteredRepost ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
 }
@@ -2268,6 +2500,12 @@ async function main() {
   const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
   const visaEnabled = Boolean(config.visa_filter) && config.visa_filter.enabled !== false;
+  // config/profile.yml `hard_filters` — deterministic enforcement (#offerly
+  // scoring brief). Previously read by nothing; see buildHardFilter above.
+  const hardFilter = buildHardFilter(loadHardFilters());
+  // Live repost gate (wires detect-reposts.mjs's fuzzy matching into the scan
+  // itself instead of leaving it a manual npm script — see buildRepostGate).
+  const repostGate = buildRepostGate(loadDecidedAgainstRolesByCompany(), loadScannedRolesByCompany());
 
   // 3. Resolve a provider for each enabled company / board
   const targets = [];
@@ -2364,9 +2602,12 @@ async function main() {
   let totalFilteredSalary = 0;
   let totalFilteredContent = 0;
   let totalFilteredCountryEligibility = 0;
+  let totalFilteredWatchAge = 0;
   let totalFilteredBlacklist = 0;
   let annotatedBlacklisted = 0;
   let totalFilteredVisa = 0;
+  let totalFilteredHardFilter = 0;
+  let totalFilteredRepost = 0;
   let totalDupes = 0;
   const newOffers = [];
   const newWatchOffers = [];
@@ -2390,6 +2631,7 @@ async function main() {
       errors: errors.length, filteredBlacklist: totalFilteredBlacklist,
       filteredVisa: totalFilteredVisa, filteredPostedDate: totalFilteredPostedDate,
       filteredCountryEligibility: totalFilteredCountryEligibility,
+      filteredHardFilter: totalFilteredHardFilter, filteredRepost: totalFilteredRepost,
     }));
     // Ctrl-C mid-sweep is the common abort. Best effort: record, then die
     // with the conventional SIGINT code.
@@ -2455,6 +2697,14 @@ async function main() {
           // Apify caches full descriptions locally for ordinary candidate roles.
           // A watch row must retain its original public link for its independent
           // TSV and Slack alert, so prefer the plugin's validated remote URL.
+          // Competitor alerts are intentionally stricter than candidate
+          // discovery: a daily watch is useful only for current postings.
+          // An undated actor item cannot prove recency, so it is not recorded
+          // or alerted rather than risking a stale catch-up burst.
+          if (!isCurrentWatchOffer(job.postedAt, competitorWatch.maxPostingAgeDays)) {
+            totalFilteredWatchAge++;
+            continue;
+          }
           const watchUrl = job._remote_url || job.url;
           if (!isHttpsUrl(watchUrl)) {
             console.warn(`Competitor watch: skipped non-HTTPS URL from ${company.name}.`);
@@ -2501,6 +2751,15 @@ async function main() {
           totalFilteredTitle++;
           continue;
         }
+        const hardFilterResult = hardFilter(job);
+        if (!hardFilterResult.pass) {
+          totalFilteredHardFilter++;
+          continue;
+        }
+        if (hardFilterResult.override) {
+          const label = `hard-filter override: ${hardFilterResult.override}`;
+          job.note = typeof job.note === 'string' && job.note.trim() ? `${label} — ${job.note}` : label;
+        }
         if (classifyTier && skipTiers.includes(classifyTier(job.title))) {
           totalFilteredTier++;
           continue;
@@ -2543,6 +2802,11 @@ async function main() {
         const key = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
         if (seenCompanyRoles.has(key)) {
           totalDupes++;
+          continue;
+        }
+        const repostResult = repostGate(job);
+        if (repostResult.isRepost) {
+          totalFilteredRepost++;
           continue;
         }
         const cooldownResult = cooldownFilter(job);
@@ -2707,6 +2971,12 @@ async function main() {
   if (Object.keys(windows).length > 0 || totalFilteredCooldown > 0) {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
   }
+  if (totalFilteredHardFilter > 0) {
+    console.log(`Filtered by hard_filters: ${totalFilteredHardFilter} removed`);
+  }
+  if (totalFilteredRepost > 0) {
+    console.log(`Filtered as repost:    ${totalFilteredRepost} removed`);
+  }
   console.log(`Duplicates:            ${totalDupes} skipped`);
   if (blacklist.size > 0) {
     if (includeBlacklisted) {
@@ -2736,6 +3006,7 @@ async function main() {
   }
   console.log(`New offers added:      ${verifiedOffers.length}`);
   if (competitorWatch.enabled) console.log(`New competitor postings: ${newWatchOffers.length}`);
+  if (competitorWatch.enabled && totalFilteredWatchAge > 0) console.log(`Competitor postings filtered by age: ${totalFilteredWatchAge}`);
 
   // Trust validation summary (only when trust_filter is configured)
   if (config.trust_filter && config.trust_filter.enabled !== false && verifiedOffers.length > 0) {
@@ -2873,6 +3144,8 @@ async function main() {
       filteredVisa: totalFilteredVisa,
       filteredPostedDate: totalFilteredPostedDate,
       filteredCountryEligibility: totalFilteredCountryEligibility,
+      filteredHardFilter: totalFilteredHardFilter,
+      filteredRepost: totalFilteredRepost,
     });
   }
   // The run completed (or was a dry run) — disarm the failure row.

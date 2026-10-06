@@ -171,7 +171,7 @@ export function FirstScoreView() {
             <button
               onClick={() => {
                 close();
-                router.push("/pipeline?tab=EVALUATED");
+                router.push("/");
               }}
               className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110"
             >

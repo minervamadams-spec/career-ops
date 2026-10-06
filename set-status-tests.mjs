@@ -156,7 +156,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 {
   const sb = makeSandbox(TRACKER_9);
   const before = readTracker(sb);
-  const r = runSetStatus(['globex', 'SKIP', '--role', 'Data Engineer', '--json'], sb);
+  const r = runSetStatus(['globex', 'SKIP', '--role', 'Data Engineer', '--reason', 'not_my_domain', '--json'], sb);
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
   if (r.code === 3 && parsed?.code === 'role-mismatch'
@@ -214,7 +214,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 `;
   const sb = makeSandbox(TRACKER_SYMBOL);
   const before = readTracker(sb);
-  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C# Engineer', '--json'], sb);
+  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C# Engineer', '--reason', 'not_my_domain', '--json'], sb);
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
   if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
@@ -333,7 +333,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 | 1 | 2026-06-01 | Contoso | C＋＋ Engineer | 4.0/5 | Evaluated | ✅ | [1](../reports/001-contoso-2026-06-01.md) | — |
 `);
   const before = readTracker(sb);
-  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C＃ Engineer', '--json'], sb);
+  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C＃ Engineer', '--reason', 'not_my_domain', '--json'], sb);
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
   if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
@@ -1239,6 +1239,77 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
       fail(`#2348: paths that did not fail closed: ${failures.join('; ')}`);
     }
   }
+}
+
+// ── skip-reason taxonomy (career-ops offerly scoring brief, 2026-09-22) ──
+// A transition INTO SKIP is a self-filter decision (patterns.md's
+// classification table), so --reason is required unless --force records an
+// explicit decision to skip capturing one — mirrors the report-mismatch
+// guard's own --force semantics elsewhere in this file.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const before = readTracker(sb);
+  const r = runSetStatus(['acme', 'SKIP', '--role', 'Backend Engineer', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 1 && parsed?.code === 'reason-required' && readTracker(sb) === before) {
+    pass('skip-reason: SKIP without --reason is refused before any write');
+  } else {
+    fail(`skip-reason required: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  const bogus = runSetStatus(['acme', 'SKIP', '--role', 'Backend Engineer', '--reason', 'not-a-real-reason', '--json'], sb);
+  let bogusParsed = null;
+  try { bogusParsed = JSON.parse(bogus.stdout); } catch {}
+  if (bogus.code === 1 && bogusParsed?.code === 'invalid-reason' && readTracker(sb) === before) {
+    pass('skip-reason: an unrecognized --reason is rejected before any write');
+  } else {
+    fail(`skip-reason invalid: code=${bogus.code} json=${JSON.stringify(bogusParsed)}\n${bogus.stdout}${bogus.stderr}`);
+  }
+
+  const byId = runSetStatus(['acme', 'SKIP', '--role', 'Backend Engineer', '--reason', 'not_my_domain', '--json'], sb);
+  const tracker1 = readTracker(sb);
+  if (byId.code === 0 && /\| 1 \|[^\n]*\| SKIP \|/.test(tracker1) && /reason=not_my_domain — Passed: Not my domain/.test(tracker1)) {
+    pass('skip-reason: a valid --reason id sets SKIP and writes the reason={id} Notes tag');
+  } else {
+    fail(`skip-reason valid id: code=${byId.code}\n${byId.stdout}${byId.stderr}\ntracker:\n${tracker1}`);
+  }
+
+  const byLabel = runSetStatus(['3', 'SKIP', '--reason', 'Comp too low', '--json'], sb);
+  const tracker2 = readTracker(sb);
+  if (byLabel.code === 0 && /\| 3 \|[^\n]*\| SKIP \|/.test(tracker2) && /reason=comp_too_low — Passed: Comp too low/.test(tracker2)) {
+    pass('skip-reason: --reason also resolves by label, case-insensitive');
+  } else {
+    fail(`skip-reason valid label: code=${byLabel.code}\n${byLabel.stdout}${byLabel.stderr}\ntracker:\n${tracker2}`);
+  }
+
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+{
+  // --force bypasses the reason requirement (an explicit decision to skip
+  // capturing one), same escape hatch the report-mismatch/role-mismatch
+  // guards already use.
+  const sb = makeSandbox(TRACKER_9);
+  const r = runSetStatus(['acme', 'SKIP', '--role', 'Backend Engineer', '--force', '--json'], sb);
+  if (r.code === 0 && /\| 1 \|[^\n]*\| SKIP \|/.test(readTracker(sb))) {
+    pass('skip-reason: --force sets SKIP without a --reason');
+  } else {
+    fail(`skip-reason force: code=${r.code}\n${r.stdout}${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+{
+  // Non-SKIP transitions are entirely unaffected by the reason requirement.
+  const sb = makeSandbox(TRACKER_9);
+  const r = runSetStatus(['acme', 'Applied', '--role', 'Backend Engineer', '--json'], sb);
+  if (r.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('skip-reason: non-SKIP transitions never require --reason');
+  } else {
+    fail(`skip-reason non-skip: code=${r.code}\n${r.stdout}${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

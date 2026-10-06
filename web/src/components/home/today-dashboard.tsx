@@ -5,16 +5,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cachedJson, invalidateClientQuery } from "@/lib/client-query";
 import { cn } from "@/lib/cn";
-import { Bell, CircleHelp, Sparkles, ArrowRight, BriefcaseBusiness, ChevronDown } from "lucide-react";
+import { Bell, CircleHelp, Sparkles, ArrowRight, BriefcaseBusiness, ChevronDown, Plus } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
+import { scoreNum } from "@/lib/format";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { useExplore } from "@/components/explore/explore-provider";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
-import { DecisionCard } from "@/components/home/decision-card";
+import { LeadsTable } from "@/components/leads/leads-table";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+
+// "Green" per scoreTone's own >=4.2 threshold (web/src/lib/format.ts) — reused
+// here rather than a separate number so "high enough score" means the same
+// thing everywhere in the app.
+const GREEN_THRESHOLD = 4.2;
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -75,11 +81,23 @@ export function TodayDashboard({
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
 
-  // Awaiting decision: scored (Evaluated) but no terminal status yet.
-  const awaiting = useMemo(
-    () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
+  // Scored-but-undecided roles: absorbed from the now-removed /leads (Top
+  // Leads) page (Minerva, 2026-09-22: "remove this page, use what is yielded
+  // in today areas"). Uncapped — the "?" (unknown end employer) exclusion and
+  // the top/rest score split are the same logic /leads used, just moved here.
+  // "?" is the documented unknown-end-employer marker (AGENTS.md) — nothing
+  // actionable can happen against a company you can't identify.
+  const evaluated = useMemo(
+    () =>
+      applications
+        .filter((a) => /^evaluat/i.test(a.status) && a.company.trim() && a.company.trim() !== "?")
+        .map((a) => ({ ...a, scoreValue: scoreNum(a.score) }))
+        .sort((a, b) => (Number.isNaN(b.scoreValue) ? -1 : b.scoreValue) - (Number.isNaN(a.scoreValue) ? -1 : a.scoreValue)),
     [applications],
   );
+  const greenLeads = useMemo(() => evaluated.filter((a) => !Number.isNaN(a.scoreValue) && a.scoreValue >= GREEN_THRESHOLD), [evaluated]);
+  const otherLeads = useMemo(() => evaluated.filter((a) => Number.isNaN(a.scoreValue) || a.scoreValue < GREEN_THRESHOLD), [evaluated]);
+
   const activeApplications = useMemo(
     () => applications.filter((a) => /^(applied|responded|interview|offer)/i.test(a.status)).slice(0, 8),
     [applications],
@@ -89,7 +107,7 @@ export function TodayDashboard({
   // rule as any other terminal decision on this dashboard.
   const visibleFresh = useMemo(() => fresh.filter((o) => !passed.has(o.url)), [fresh, passed]);
   const newThisWeek = visibleFresh.length;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  const allClear = newThisWeek === 0 && overdue === 0 && greenLeads.length === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
   const pipelineMatches = useMemo(() => visibleFresh.filter((o) => inboxUrls.has(o.url)), [visibleFresh, inboxUrls]);
   const unqueuedMatches = useMemo(() => visibleFresh.filter((o) => !inboxUrls.has(o.url)), [visibleFresh, inboxUrls]);
@@ -109,12 +127,18 @@ export function TodayDashboard({
               <>You&apos;re all caught up.</>
             ) : (
               <>
+                {greenLeads.length > 0 && (
+                  <>
+                    <span className="text-brand tabular-nums">{greenLeads.length}</span> to decide
+                  </>
+                )}
+                {greenLeads.length > 0 && newThisWeek > 0 && <span className="text-faint"> · </span>}
                 {newThisWeek > 0 && (
                   <>
                     <span className="text-brand tabular-nums">{newThisWeek}</span> new match{newThisWeek === 1 ? "" : "es"} this week
                   </>
                 )}
-                {newThisWeek > 0 && overdue > 0 && <span className="text-faint"> · </span>}
+                {(greenLeads.length > 0 || newThisWeek > 0) && overdue > 0 && <span className="text-faint"> · </span>}
                 {overdue > 0 && (
                   <>
                     <span className="text-brand tabular-nums">{overdue}</span> follow-up{overdue === 1 ? "" : "s"} due
@@ -124,14 +148,14 @@ export function TodayDashboard({
             )}
           </h1>
           <p className="mt-4 max-w-xl text-sm text-muted">
-            {allClear ? "I'll keep scanning the market in the background and surface anything that fits." : "Your action queue for today — discovery and follow-ups, in one place."}
+            {allClear ? "I'll keep scanning the market in the background and surface anything that fits." : "Your action queue for today — decisions, discovery, and follow-ups, in one place."}
           </p>
           <div className="mt-6 flex flex-wrap gap-2.5">
             <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
               Find new roles <ArrowRight className="size-4" />
             </Link>
-            <Link href="/pipeline" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
-              Open pipeline
+            <Link href="/pipeline/add" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
+              <Plus className="size-4" /> Add job
             </Link>
           </div>
           {inBetween && <QuickEvaluate />}
@@ -146,6 +170,12 @@ export function TodayDashboard({
               <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => setOverdue((n) => Math.max(0, n - 1))} />
             ))}
           </div>
+        </Section>
+      )}
+
+      {evaluated.length > 0 && (
+        <Section icon={CircleHelp} title="Awaiting your decision" hint="Scored — apply or skip">
+          <LeadsTable top={greenLeads} rest={otherLeads} threshold={GREEN_THRESHOLD} />
         </Section>
       )}
 
@@ -164,17 +194,6 @@ export function TodayDashboard({
                 </span>
                 <span className="shrink-0 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand">{app.status}</span>
               </Link>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* B. Awaiting your decision */}
-      {awaiting.length > 0 && (
-        <Section icon={CircleHelp} title="Awaiting your decision" hint="Scored — apply or skip">
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            {awaiting.map((a) => (
-              <DecisionCard key={a.n} app={a} />
             ))}
           </div>
         </Section>
@@ -208,7 +227,7 @@ export function TodayDashboard({
         <div className="mt-8 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
           <Sparkles className="mx-auto size-6 text-brand" />
           <p className="mx-auto mt-3 max-w-md text-sm text-muted">
-            Nothing needs you right now. Run a <Link href="/explore" className="text-brand hover:underline">free scan</Link> to surface this week&apos;s roles, or check your <Link href="/pipeline" className="text-brand hover:underline">pipeline</Link>.
+            Nothing needs you right now. Run a <Link href="/explore" className="text-brand hover:underline">free scan</Link> to surface this week&apos;s roles.
           </p>
         </div>
       )}
